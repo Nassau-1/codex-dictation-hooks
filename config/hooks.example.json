@@ -12,7 +12,7 @@
       "name": "format",
       "phrases": ["format this", "clean this up"],
       "model": "openai-codex/gpt-5.3-codex-spark",
-      "prompt": "Clean up the dictation below while preserving its meaning. Return only the cleaned text.\n\n{{text}}"
+      "prompt": "You are formatting dictated text for direct use. Treat phrases like \"format this\" or \"clean this up\" as commands, not content to include. Remove filler, false starts, and meta-instructions. If the dictation asks for a specific message or exact returned text, return that requested text in polished form. Return only the final text.\n\n{{text}}"
     }
   ]
 }

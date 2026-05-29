@@ -25,18 +25,18 @@ final class HookHudView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        let pillRect = bounds.insetBy(dx: 12, dy: 10)
+        let pillRect = bounds.insetBy(dx: 5, dy: 5)
         let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: pillRect.height / 2, yRadius: pillRect.height / 2)
 
-        NSColor(calibratedWhite: 0.05, alpha: 0.86).setFill()
+        NSColor(calibratedWhite: 0.05, alpha: 0.78).setFill()
         pillPath.fill()
 
-        NSColor(calibratedWhite: 1.0, alpha: 0.11).setStroke()
-        pillPath.lineWidth = 1.2
+        NSColor(calibratedWhite: 1.0, alpha: 0.08).setStroke()
+        pillPath.lineWidth = 1
         pillPath.stroke()
 
-        let dotDiameter: CGFloat = 12
-        let dotGap: CGFloat = 7
+        let dotDiameter: CGFloat = 6
+        let dotGap: CGFloat = 5
         let totalWidth = dotDiameter * 4 + dotGap * 3
         let startX = bounds.midX - totalWidth / 2
         let y = bounds.midY - dotDiameter / 2
@@ -57,8 +57,8 @@ let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
 let frame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-let width: CGFloat = 132
-let height: CGFloat = 64
+let width: CGFloat = 76
+let height: CGFloat = 32
 let origin = NSPoint(
     x: frame.midX - width / 2,
     y: frame.midY - height / 2
@@ -73,7 +73,7 @@ let window = NSPanel(
 
 window.isOpaque = false
 window.backgroundColor = .clear
-window.hasShadow = true
+window.hasShadow = false
 window.level = .floating
 window.ignoresMouseEvents = true
 window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
