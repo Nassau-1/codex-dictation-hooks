@@ -158,15 +158,15 @@ function shouldShowHud(config) {
   return config.showHud !== false;
 }
 
-function startHud(config) {
+function startHud(config, args = []) {
   const hudPath = process.env.CODEX_DICTATION_HUD_PATH;
   if (!shouldShowHud(config) || !hudPath || !fs.existsSync(hudPath)) return null;
 
   try {
     const child = fs.statSync(hudPath).mode & 0o111
-      ? spawn(hudPath, [], { detached: false, stdio: "ignore" })
+      ? spawn(hudPath, args, { detached: false, stdio: "ignore" })
       : commandExists("swift")
-        ? spawn("/usr/bin/swift", [hudPath], { detached: false, stdio: "ignore" })
+        ? spawn("/usr/bin/swift", [hudPath, ...args], { detached: false, stdio: "ignore" })
         : null;
 
     if (!child) return null;
@@ -175,6 +175,11 @@ function startHud(config) {
   } catch {
     return null;
   }
+}
+
+function showHudNotice(config, message) {
+  const child = startHud(config, ["error", message]);
+  if (child) child.unref();
 }
 
 function stopHud(child) {
@@ -196,6 +201,7 @@ function maybeTransformText(text) {
   const agentCommand = renderAgentCommand(process.env.CODEX_DICTATION_AGENT_COMMAND || config.agentCommand, model, config);
   if (!commandExists(agentCommand)) {
     console.error(`Matched hook "${hook.name || "unnamed"}" but agent command is unavailable.`);
+    showHudNotice(config, "Hook agent unavailable");
     return text;
   }
 
@@ -211,11 +217,15 @@ function maybeTransformText(text) {
   if (result.error || result.status !== 0) {
     const detail = result.error?.message || result.stderr?.trim() || `exit ${result.status}`;
     console.error(`Hook "${hook.name || "unnamed"}" failed: ${detail}`);
+    showHudNotice(config, "Hook failed. Using original text.");
     return text;
   }
 
   const transformed = result.stdout.trim();
-  if (!transformed) return text;
+  if (!transformed) {
+    showHudNotice(config, "Hook returned no text");
+    return text;
+  }
 
   const modelLabel = model ? ` using ${model}` : "";
   console.log(`[${new Date().toISOString()}] transformed dictation with hook: ${hook.name || "unnamed"}${modelLabel}`);
@@ -383,15 +393,15 @@ function shouldShowHud(config) {
   return config.showHud !== false;
 }
 
-function startHud(config) {
+function startHud(config, args = []) {
   const hudPath = process.env.CODEX_DICTATION_HUD_PATH;
   if (!shouldShowHud(config) || !hudPath || !fs.existsSync(hudPath)) return null;
 
   try {
     const child = fs.statSync(hudPath).mode & 0o111
-      ? spawn(hudPath, [], { detached: false, stdio: "ignore" })
+      ? spawn(hudPath, args, { detached: false, stdio: "ignore" })
       : commandExists("swift")
-        ? spawn("/usr/bin/swift", [hudPath], { detached: false, stdio: "ignore" })
+        ? spawn("/usr/bin/swift", [hudPath, ...args], { detached: false, stdio: "ignore" })
         : null;
 
     if (!child) return null;
@@ -400,6 +410,11 @@ function startHud(config) {
   } catch {
     return null;
   }
+}
+
+function showHudNotice(config, message) {
+  const child = startHud(config, ["error", message]);
+  if (child) child.unref();
 }
 
 function stopHud(child) {
@@ -419,7 +434,10 @@ function maybeTransformText(text) {
 
   const model = selectedModel(config, hook);
   const agentCommand = renderAgentCommand(process.env.CODEX_DICTATION_AGENT_COMMAND || config.agentCommand, model, config);
-  if (!commandExists(agentCommand)) return text;
+  if (!commandExists(agentCommand)) {
+    showHudNotice(config, "Hook agent unavailable");
+    return text;
+  }
 
   const prompt = renderHookPrompt(hook.prompt, text, model);
   const env = { ...process.env };
@@ -430,7 +448,13 @@ function maybeTransformText(text) {
   const result = spawnSync("zsh", ["-lc", agentCommand], { input: prompt, encoding: "utf8", env });
   stopHud(hud);
 
-  const transformed = result.status === 0 ? result.stdout.trim() : "";
+  if (result.error || result.status !== 0) {
+    showHudNotice(config, "Hook failed. Using original text.");
+    return text;
+  }
+
+  const transformed = result.stdout.trim();
+  if (!transformed) showHudNotice(config, "Hook returned no text");
 
   return transformed || text;
 }
