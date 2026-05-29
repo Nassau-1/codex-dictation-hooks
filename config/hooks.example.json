@@ -1,6 +1,6 @@
 {
   "agentCommand": "pi -p --no-tools --model {{model}}",
-  "defaultModel": "openai/gpt-5-codex",
+  "defaultModel": "openai-codex/gpt-5.3-codex-spark",
   "hooks": [
     {
       "name": "email",
@@ -10,7 +10,7 @@
     {
       "name": "format",
       "phrases": ["format this", "clean this up"],
-      "model": "openai/gpt-5",
+      "model": "openai-codex/gpt-5.3-codex-spark",
       "prompt": "Clean up the dictation below while preserving its meaning. Return only the cleaned text.\n\n{{text}}"
     }
   ]
