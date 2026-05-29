@@ -1,0 +1,212 @@
+#!/bin/zsh
+set -euo pipefail
+
+label="com.hcassar93.codex-dictation-hooks"
+install_path="$HOME/.local/bin/codex-dictation-hooks"
+plist_path="$HOME/Library/LaunchAgents/$label.plist"
+history_file="${CODEX_DICTATION_HISTORY:-$HOME/.codex/transcription-history.jsonl}"
+log_dir="$HOME/.codex/log"
+stdout_log="$log_dir/codex-dictation-hooks.out.log"
+stderr_log="$log_dir/codex-dictation-hooks.err.log"
+
+find_node() {
+  if [[ -n "${CODEX_DICTATION_NODE:-}" && -x "${CODEX_DICTATION_NODE:-}" ]]; then
+    printf "%s" "$CODEX_DICTATION_NODE"
+    return
+  fi
+
+  for candidate in \
+    /opt/homebrew/bin/node \
+    /usr/local/bin/node \
+    /Applications/Codex.app/Contents/Resources/node; do
+    if [[ -x "$candidate" ]]; then
+      printf "%s" "$candidate"
+      return
+    fi
+  done
+
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return
+  fi
+
+  printf "node"
+}
+
+watch_history() {
+  mkdir -p "$(dirname "$history_file")"
+  touch "$history_file"
+
+  local node_bin
+  node_bin="$(find_node)"
+
+  "$node_bin" - "$history_file" <<'NODE'
+const fs = require("fs");
+const { spawnSync } = require("child_process");
+
+const historyFile = process.argv[2];
+let offset = fs.statSync(historyFile).size;
+let buffer = "";
+
+function runAction(text) {
+  const action = process.env.CODEX_DICTATION_ACTION;
+  const result = action
+    ? spawnSync(action, { input: text, encoding: "utf8", shell: true })
+    : spawnSync("/usr/bin/pbcopy", { input: text, encoding: "utf8" });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`action exited with status ${result.status}`);
+  }
+}
+
+function processLine(line) {
+  if (!line.trim()) return;
+
+  try {
+    const item = JSON.parse(line);
+    const text = typeof item.text === "string" ? item.text.trim() : "";
+    if (!text) return;
+
+    runAction(text);
+    console.log(`[${new Date().toISOString()}] handled dictation: ${text}`);
+  } catch {
+    // Codex appends valid JSONL. Ignore partial or malformed lines.
+  }
+}
+
+function poll() {
+  let size;
+
+  try {
+    size = fs.statSync(historyFile).size;
+  } catch {
+    return;
+  }
+
+  if (size < offset) {
+    offset = 0;
+    buffer = "";
+  }
+
+  if (size <= offset) return;
+
+  const fd = fs.openSync(historyFile, "r");
+  try {
+    const chunk = Buffer.alloc(size - offset);
+    fs.readSync(fd, chunk, 0, chunk.length, offset);
+    offset = size;
+    buffer += chunk.toString("utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
+
+  let newlineIndex;
+  while ((newlineIndex = buffer.indexOf("\n")) !== -1) {
+    const line = buffer.slice(0, newlineIndex);
+    buffer = buffer.slice(newlineIndex + 1);
+    processLine(line);
+  }
+}
+
+setInterval(poll, 500);
+console.log(`Watching ${historyFile}`);
+NODE
+}
+
+handle_latest() {
+  local node_bin
+  local text
+  node_bin="$(find_node)"
+
+  text="$("$node_bin" - "$history_file" <<'NODE'
+const fs = require("fs");
+const historyFile = process.argv[2];
+
+const lines = fs.existsSync(historyFile)
+  ? fs.readFileSync(historyFile, "utf8").trim().split(/\r?\n/).reverse()
+  : [];
+
+for (const line of lines) {
+  try {
+    const item = JSON.parse(line);
+    if (typeof item.text === "string" && item.text.trim()) {
+      process.stdout.write(item.text.trim());
+      process.exit(0);
+    }
+  } catch {}
+}
+NODE
+)"
+
+  [[ -z "$text" ]] && return
+
+  if [[ -n "${CODEX_DICTATION_ACTION:-}" ]]; then
+    printf "%s" "$text" | zsh -c "$CODEX_DICTATION_ACTION"
+  else
+    printf "%s" "$text" | /usr/bin/pbcopy
+  fi
+}
+
+install_agent() {
+  mkdir -p "$(dirname "$install_path")" "$HOME/Library/LaunchAgents" "$log_dir"
+  cp "$0" "$install_path"
+  chmod +x "$install_path"
+
+  /usr/bin/env python3 - "$plist_path" "$label" "$install_path" "$stdout_log" "$stderr_log" <<'PY'
+import plistlib
+import sys
+
+plist_path, label, install_path, stdout_log, stderr_log = sys.argv[1:]
+plist = {
+    "Label": label,
+    "ProgramArguments": [install_path, "watch"],
+    "RunAtLoad": True,
+    "KeepAlive": True,
+    "StandardOutPath": stdout_log,
+    "StandardErrorPath": stderr_log,
+}
+
+with open(plist_path, "wb") as f:
+    plistlib.dump(plist, f)
+PY
+
+  launchctl bootout "gui/$(id -u)" "$plist_path" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$plist_path"
+  launchctl enable "gui/$(id -u)/$label" >/dev/null 2>&1 || true
+  launchctl kickstart -k "gui/$(id -u)/$label"
+
+  printf "Installed %s\n" "$label"
+}
+
+uninstall_agent() {
+  launchctl bootout "gui/$(id -u)" "$plist_path" >/dev/null 2>&1 || true
+  rm -f "$plist_path"
+  printf "Uninstalled %s\n" "$label"
+}
+
+status_agent() {
+  launchctl print "gui/$(id -u)/$label"
+}
+
+case "${1:-watch}" in
+  watch)
+    watch_history
+    ;;
+  install)
+    install_agent
+    ;;
+  uninstall)
+    uninstall_agent
+    ;;
+  status)
+    status_agent
+    ;;
+  latest)
+    handle_latest
+    ;;
+  *)
+    printf "Usage: %s [watch|install|uninstall|status|latest]\n" "$0" >&2
+    exit 2
+    ;;
+esac
