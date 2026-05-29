@@ -384,16 +384,19 @@ install_agent() {
   cp "$script_path" "$install_path"
   chmod +x "$install_path"
 
-  /usr/bin/env python3 - "$plist_path" "$label" "$install_path" "$stdout_log" "$stderr_log" <<'PY'
+  /usr/bin/env python3 - "$plist_path" "$label" "$install_path" "$stdout_log" "$stderr_log" "$PATH" <<'PY'
 import plistlib
 import sys
 
-plist_path, label, install_path, stdout_log, stderr_log = sys.argv[1:]
+plist_path, label, install_path, stdout_log, stderr_log, path = sys.argv[1:]
 plist = {
     "Label": label,
     "ProgramArguments": [install_path, "watch"],
     "RunAtLoad": True,
     "KeepAlive": True,
+    "EnvironmentVariables": {
+        "PATH": path,
+    },
     "StandardOutPath": stdout_log,
     "StandardErrorPath": stderr_log,
 }

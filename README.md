@@ -74,8 +74,8 @@ cp config/hooks.example.json config/hooks.json
 
 ```json
 {
-  "agentCommand": "pi --model {{model}}",
-  "defaultModel": "gpt-5-codex",
+  "agentCommand": "pi -p --no-tools --model {{model}}",
+  "defaultModel": "openai/gpt-5-codex",
   "hooks": [
     {
       "name": "email",
@@ -101,8 +101,8 @@ If your agent command does not include `{{model}}`, you can also set `modelArgum
 ```json
 {
   "agentCommand": "pi",
-  "defaultModel": "gpt-5-codex",
-  "modelArgument": "--model {{model}}",
+  "defaultModel": "openai/gpt-5-codex",
+  "modelArgument": "-p --no-tools --model {{model}}",
   "hooks": []
 }
 ```
