@@ -1,6 +1,7 @@
 {
   "agentCommand": "pi -p --no-tools --model {{model}}",
   "defaultModel": "openai-codex/gpt-5.3-codex-spark",
+  "showHud": true,
   "hooks": [
     {
       "name": "email",

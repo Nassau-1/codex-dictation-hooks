@@ -10,6 +10,12 @@ stdout_log="$log_dir/codex-dictation-hooks.out.log"
 stderr_log="$log_dir/codex-dictation-hooks.err.log"
 script_path="${0:A}"
 script_dir="${script_path:h}"
+hud_binary_path="$script_dir/codex-dictation-hooks-hud"
+hud_source_path="$script_dir/codex-dictation-hooks-hud.swift"
+hud_path="$hud_binary_path"
+if [[ ! -f "$hud_path" && -f "$hud_source_path" ]]; then
+  hud_path="$hud_source_path"
+fi
 repo_config_path="$script_dir/../config/hooks.json"
 user_config_path="$HOME/.config/codex-dictation-hooks/hooks.json"
 hooks_config="${CODEX_DICTATION_HOOKS_CONFIG:-}"
@@ -53,9 +59,9 @@ watch_history() {
   local node_bin
   node_bin="$(find_node)"
 
-  CODEX_DICTATION_HOOKS_CONFIG="$hooks_config" "$node_bin" - "$history_file" <<'NODE'
+  CODEX_DICTATION_HOOKS_CONFIG="$hooks_config" CODEX_DICTATION_HUD_PATH="$hud_path" "$node_bin" - "$history_file" <<'NODE'
 const fs = require("fs");
-const { spawnSync } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 
 const historyFile = process.argv[2];
 const hooksConfigPath = process.env.CODEX_DICTATION_HOOKS_CONFIG;
@@ -144,6 +150,41 @@ function renderHookPrompt(template, text, model) {
     .replaceAll("{{model}}", model || "");
 }
 
+function shouldShowHud(config) {
+  const envValue = process.env.CODEX_DICTATION_HUD;
+  if (envValue === "0" || envValue === "false" || envValue === "off") return false;
+  if (envValue === "1" || envValue === "true" || envValue === "on") return true;
+
+  return config.showHud !== false;
+}
+
+function startHud(config) {
+  const hudPath = process.env.CODEX_DICTATION_HUD_PATH;
+  if (!shouldShowHud(config) || !hudPath || !fs.existsSync(hudPath)) return null;
+
+  try {
+    const child = fs.statSync(hudPath).mode & 0o111
+      ? spawn(hudPath, [], { detached: false, stdio: "ignore" })
+      : commandExists("swift")
+        ? spawn("/usr/bin/swift", [hudPath], { detached: false, stdio: "ignore" })
+        : null;
+
+    if (!child) return null;
+    child.unref();
+    return child;
+  } catch {
+    return null;
+  }
+}
+
+function stopHud(child) {
+  if (!child || child.killed) return;
+
+  try {
+    child.kill("SIGTERM");
+  } catch {}
+}
+
 function maybeTransformText(text) {
   const config = readHooksConfig();
   if (!config || !Array.isArray(config.hooks)) return text;
@@ -163,7 +204,9 @@ function maybeTransformText(text) {
   if (model) env.CODEX_DICTATION_MODEL = model;
   if (hook.name) env.CODEX_DICTATION_HOOK_NAME = String(hook.name);
 
+  const hud = startHud(config);
   const result = spawnSync("zsh", ["-lc", agentCommand], { input: prompt, encoding: "utf8", env });
+  stopHud(hud);
 
   if (result.error || result.status !== 0) {
     const detail = result.error?.message || result.stderr?.trim() || `exit ${result.status}`;
@@ -251,9 +294,9 @@ handle_latest() {
   local text
   node_bin="$(find_node)"
 
-  text="$(CODEX_DICTATION_HOOKS_CONFIG="$hooks_config" "$node_bin" - "$history_file" <<'NODE'
+  text="$(CODEX_DICTATION_HOOKS_CONFIG="$hooks_config" CODEX_DICTATION_HUD_PATH="$hud_path" "$node_bin" - "$history_file" <<'NODE'
 const fs = require("fs");
-const { spawnSync } = require("child_process");
+const { spawn, spawnSync } = require("child_process");
 
 const historyFile = process.argv[2];
 const hooksConfigPath = process.env.CODEX_DICTATION_HOOKS_CONFIG;
@@ -332,6 +375,41 @@ function renderHookPrompt(template, text, model) {
     .replaceAll("{{model}}", model || "");
 }
 
+function shouldShowHud(config) {
+  const envValue = process.env.CODEX_DICTATION_HUD;
+  if (envValue === "0" || envValue === "false" || envValue === "off") return false;
+  if (envValue === "1" || envValue === "true" || envValue === "on") return true;
+
+  return config.showHud !== false;
+}
+
+function startHud(config) {
+  const hudPath = process.env.CODEX_DICTATION_HUD_PATH;
+  if (!shouldShowHud(config) || !hudPath || !fs.existsSync(hudPath)) return null;
+
+  try {
+    const child = fs.statSync(hudPath).mode & 0o111
+      ? spawn(hudPath, [], { detached: false, stdio: "ignore" })
+      : commandExists("swift")
+        ? spawn("/usr/bin/swift", [hudPath], { detached: false, stdio: "ignore" })
+        : null;
+
+    if (!child) return null;
+    child.unref();
+    return child;
+  } catch {
+    return null;
+  }
+}
+
+function stopHud(child) {
+  if (!child || child.killed) return;
+
+  try {
+    child.kill("SIGTERM");
+  } catch {}
+}
+
 function maybeTransformText(text) {
   const config = readHooksConfig();
   if (!config || !Array.isArray(config.hooks)) return text;
@@ -348,7 +426,10 @@ function maybeTransformText(text) {
   if (model) env.CODEX_DICTATION_MODEL = model;
   if (hook.name) env.CODEX_DICTATION_HOOK_NAME = String(hook.name);
 
+  const hud = startHud(config);
   const result = spawnSync("zsh", ["-lc", agentCommand], { input: prompt, encoding: "utf8", env });
+  stopHud(hud);
+
   const transformed = result.status === 0 ? result.stdout.trim() : "";
 
   return transformed || text;
@@ -383,6 +464,18 @@ install_agent() {
   mkdir -p "$(dirname "$install_path")" "$HOME/Library/LaunchAgents" "$log_dir"
   cp "$script_path" "$install_path"
   chmod +x "$install_path"
+  if [[ -f "$hud_path" ]]; then
+    local hud_install_path
+    hud_install_path="$(dirname "$install_path")/codex-dictation-hooks-hud"
+    if [[ -f "$hud_source_path" ]] && command -v swiftc >/dev/null 2>&1; then
+      swiftc "$hud_source_path" -o "$hud_install_path"
+    elif [[ -x "$hud_binary_path" ]]; then
+      cp "$hud_binary_path" "$hud_install_path"
+      chmod +x "$hud_install_path"
+    else
+      cp "$hud_source_path" "$hud_install_path.swift"
+    fi
+  fi
 
   /usr/bin/env python3 - "$plist_path" "$label" "$install_path" "$stdout_log" "$stderr_log" "$PATH" <<'PY'
 import plistlib

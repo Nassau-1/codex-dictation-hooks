@@ -62,6 +62,8 @@ CODEX_DICTATION_ACTION="/path/to/your-action" ./bin/codex-dictation-hooks watch
 
 The transcript is passed to the action on standard input, so the action can format, rewrite, route, or store it.
 
+When a deterministic hook runs, a small native macOS processing HUD appears until the agent returns. Set `"showHud": false` in your hooks config, or run with `CODEX_DICTATION_HUD=0`, to disable it.
+
 ## Deterministic Agent Hooks
 
 Create a local hooks file in the repo:
