@@ -1,2 +1,4 @@
 .DS_Store
 *.log
+config/hooks.json
+config/*.local.json

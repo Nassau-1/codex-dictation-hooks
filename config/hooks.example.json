@@ -1,0 +1,15 @@
+{
+  "agentCommand": "pi",
+  "hooks": [
+    {
+      "name": "email",
+      "phrases": ["email", "draft email"],
+      "prompt": "Rewrite the dictation below as a clear email draft. Return only the rewritten text.\n\n{{text}}"
+    },
+    {
+      "name": "format",
+      "phrases": ["format this", "clean this up"],
+      "prompt": "Clean up the dictation below while preserving its meaning. Return only the cleaned text.\n\n{{text}}"
+    }
+  ]
+}

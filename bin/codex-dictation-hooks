@@ -8,6 +8,18 @@ history_file="${CODEX_DICTATION_HISTORY:-$HOME/.codex/transcription-history.json
 log_dir="$HOME/.codex/log"
 stdout_log="$log_dir/codex-dictation-hooks.out.log"
 stderr_log="$log_dir/codex-dictation-hooks.err.log"
+script_dir="${0:A:h}"
+repo_config_path="$script_dir/../config/hooks.json"
+user_config_path="$HOME/.config/codex-dictation-hooks/hooks.json"
+hooks_config="${CODEX_DICTATION_HOOKS_CONFIG:-}"
+
+if [[ -z "$hooks_config" ]]; then
+  if [[ -f "$repo_config_path" ]]; then
+    hooks_config="$repo_config_path"
+  else
+    hooks_config="$user_config_path"
+  fi
+fi
 
 find_node() {
   if [[ -n "${CODEX_DICTATION_NODE:-}" && -x "${CODEX_DICTATION_NODE:-}" ]]; then
@@ -40,13 +52,90 @@ watch_history() {
   local node_bin
   node_bin="$(find_node)"
 
-  "$node_bin" - "$history_file" <<'NODE'
+  CODEX_DICTATION_HOOKS_CONFIG="$hooks_config" "$node_bin" - "$history_file" <<'NODE'
 const fs = require("fs");
 const { spawnSync } = require("child_process");
 
 const historyFile = process.argv[2];
+const hooksConfigPath = process.env.CODEX_DICTATION_HOOKS_CONFIG;
 let offset = fs.statSync(historyFile).size;
 let buffer = "";
+let hooksConfigCache = { mtimeMs: null, config: null };
+
+function commandExists(command) {
+  if (!command || typeof command !== "string") return false;
+
+  const executable = command.trim().split(/\s+/)[0];
+  if (!executable) return false;
+  if (executable.includes("/")) return fs.existsSync(executable);
+
+  const result = spawnSync("zsh", ["-lc", `command -v ${(JSON.stringify(executable))} >/dev/null 2>&1`]);
+  return result.status === 0;
+}
+
+function readHooksConfig() {
+  if (!hooksConfigPath || !fs.existsSync(hooksConfigPath)) return null;
+
+  try {
+    const stat = fs.statSync(hooksConfigPath);
+    if (hooksConfigCache.mtimeMs === stat.mtimeMs) return hooksConfigCache.config;
+
+    const parsed = JSON.parse(fs.readFileSync(hooksConfigPath, "utf8"));
+    hooksConfigCache = { mtimeMs: stat.mtimeMs, config: parsed };
+    return parsed;
+  } catch (error) {
+    console.error(`Failed to read hooks config: ${error.message}`);
+    hooksConfigCache = { mtimeMs: null, config: null };
+    return null;
+  }
+}
+
+function findMatchingHook(text, hooks) {
+  const normalized = text.toLocaleLowerCase();
+
+  return hooks.find((hook) => {
+    if (!hook || !Array.isArray(hook.phrases)) return false;
+
+    return hook.phrases.some((phrase) => (
+      typeof phrase === "string" &&
+      phrase.trim().length > 0 &&
+      normalized.includes(phrase.trim().toLocaleLowerCase())
+    ));
+  });
+}
+
+function renderPrompt(template, text) {
+  return String(template || "{{text}}").replaceAll("{{text}}", text);
+}
+
+function maybeTransformText(text) {
+  const config = readHooksConfig();
+  if (!config || !Array.isArray(config.hooks)) return text;
+
+  const hook = findMatchingHook(text, config.hooks);
+  if (!hook) return text;
+
+  const agentCommand = process.env.CODEX_DICTATION_AGENT_COMMAND || config.agentCommand;
+  if (!commandExists(agentCommand)) {
+    console.error(`Matched hook "${hook.name || "unnamed"}" but agent command is unavailable.`);
+    return text;
+  }
+
+  const prompt = renderPrompt(hook.prompt, text);
+  const result = spawnSync(agentCommand, { input: prompt, encoding: "utf8", shell: true });
+
+  if (result.error || result.status !== 0) {
+    const detail = result.error?.message || result.stderr?.trim() || `exit ${result.status}`;
+    console.error(`Hook "${hook.name || "unnamed"}" failed: ${detail}`);
+    return text;
+  }
+
+  const transformed = result.stdout.trim();
+  if (!transformed) return text;
+
+  console.log(`[${new Date().toISOString()}] transformed dictation with hook: ${hook.name || "unnamed"}`);
+  return transformed;
+}
 
 function runAction(text) {
   const action = process.env.CODEX_DICTATION_ACTION;
@@ -68,8 +157,9 @@ function processLine(line) {
     const text = typeof item.text === "string" ? item.text.trim() : "";
     if (!text) return;
 
-    runAction(text);
-    console.log(`[${new Date().toISOString()}] handled dictation: ${text}`);
+    const handledText = maybeTransformText(text);
+    runAction(handledText);
+    console.log(`[${new Date().toISOString()}] handled dictation: ${handledText}`);
   } catch {
     // Codex appends valid JSONL. Ignore partial or malformed lines.
   }
@@ -119,9 +209,68 @@ handle_latest() {
   local text
   node_bin="$(find_node)"
 
-  text="$("$node_bin" - "$history_file" <<'NODE'
+  text="$(CODEX_DICTATION_HOOKS_CONFIG="$hooks_config" "$node_bin" - "$history_file" <<'NODE'
 const fs = require("fs");
+const { spawnSync } = require("child_process");
+
 const historyFile = process.argv[2];
+const hooksConfigPath = process.env.CODEX_DICTATION_HOOKS_CONFIG;
+
+function commandExists(command) {
+  if (!command || typeof command !== "string") return false;
+
+  const executable = command.trim().split(/\s+/)[0];
+  if (!executable) return false;
+  if (executable.includes("/")) return fs.existsSync(executable);
+
+  const result = spawnSync("zsh", ["-lc", `command -v ${JSON.stringify(executable)} >/dev/null 2>&1`]);
+  return result.status === 0;
+}
+
+function readHooksConfig() {
+  if (!hooksConfigPath || !fs.existsSync(hooksConfigPath)) return null;
+
+  try {
+    return JSON.parse(fs.readFileSync(hooksConfigPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function findMatchingHook(text, hooks) {
+  const normalized = text.toLocaleLowerCase();
+
+  return hooks.find((hook) => {
+    if (!hook || !Array.isArray(hook.phrases)) return false;
+
+    return hook.phrases.some((phrase) => (
+      typeof phrase === "string" &&
+      phrase.trim().length > 0 &&
+      normalized.includes(phrase.trim().toLocaleLowerCase())
+    ));
+  });
+}
+
+function renderPrompt(template, text) {
+  return String(template || "{{text}}").replaceAll("{{text}}", text);
+}
+
+function maybeTransformText(text) {
+  const config = readHooksConfig();
+  if (!config || !Array.isArray(config.hooks)) return text;
+
+  const hook = findMatchingHook(text, config.hooks);
+  if (!hook) return text;
+
+  const agentCommand = process.env.CODEX_DICTATION_AGENT_COMMAND || config.agentCommand;
+  if (!commandExists(agentCommand)) return text;
+
+  const prompt = renderPrompt(hook.prompt, text);
+  const result = spawnSync(agentCommand, { input: prompt, encoding: "utf8", shell: true });
+  const transformed = result.status === 0 ? result.stdout.trim() : "";
+
+  return transformed || text;
+}
 
 const lines = fs.existsSync(historyFile)
   ? fs.readFileSync(historyFile, "utf8").trim().split(/\r?\n/).reverse()
@@ -131,7 +280,7 @@ for (const line of lines) {
   try {
     const item = JSON.parse(line);
     if (typeof item.text === "string" && item.text.trim()) {
-      process.stdout.write(item.text.trim());
+      process.stdout.write(maybeTransformText(item.text.trim()));
       process.exit(0);
     }
   } catch {}
