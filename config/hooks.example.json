@@ -2,6 +2,12 @@
   "agentCommand": "pi -p --no-tools --model {{model}}",
   "defaultModel": "openai-codex/gpt-5.3-codex-spark",
   "showHud": true,
+  "tallyHud": {
+    "mode": "sequence",
+    "addedSeconds": 3,
+    "totalSeconds": 5,
+    "combinedSeconds": 5
+  },
   "hooks": [
     {
       "name": "email",

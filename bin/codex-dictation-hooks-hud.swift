@@ -42,7 +42,11 @@ final class HookHudView: NSView {
         pillPath.stroke()
 
         if let message {
-            drawNotice(message, in: pillRect)
+            if noticeKind == "tally" {
+                drawTallyNotice(message, in: pillRect)
+            } else {
+                drawNotice(message, in: pillRect)
+            }
             return
         }
 
@@ -79,6 +83,37 @@ final class HookHudView: NSView {
         let textRect = NSRect(x: dotRect.maxX + 9, y: rect.midY - 8, width: rect.width - 42, height: 18)
         NSString(string: message).draw(in: textRect, withAttributes: attributes)
     }
+
+    private func drawTallyNotice(_ message: String, in rect: NSRect) {
+        let parts = message.components(separatedBy: "||")
+        let added = parts.first ?? message
+        let total = parts.dropFirst().joined(separator: " ").trimmingCharacters(in: .whitespaces)
+
+        let dotDiameter: CGFloat = 7
+        let dotRect = NSRect(x: rect.minX + 14, y: rect.midY - dotDiameter / 2, width: dotDiameter, height: dotDiameter)
+        NSColor.systemGreen.withAlphaComponent(0.85).setFill()
+        NSBezierPath(ovalIn: dotRect).fill()
+
+        let primaryAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.9)
+        ]
+        let secondaryAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.62)
+        ]
+
+        var x = dotRect.maxX + 9
+        let y = rect.midY - 8
+        NSString(string: added).draw(at: NSPoint(x: x, y: y), withAttributes: primaryAttributes)
+        x += NSString(string: added).size(withAttributes: primaryAttributes).width + 8
+
+        if !total.isEmpty {
+            NSString(string: "•").draw(at: NSPoint(x: x, y: y), withAttributes: secondaryAttributes)
+            x += NSString(string: "•").size(withAttributes: secondaryAttributes).width + 8
+            NSString(string: total).draw(at: NSPoint(x: x, y: y), withAttributes: secondaryAttributes)
+        }
+    }
 }
 
 let app = NSApplication.shared
@@ -91,7 +126,7 @@ let durationSeconds: TimeInterval = {
     guard hasExplicitDuration, let duration = TimeInterval(noticeArgs[1]) else { return 5.0 }
     return max(0.8, min(duration, 20.0))
 }()
-let isNotice = noticeKind == "error" || noticeKind == "info"
+let isNotice = noticeKind == "error" || noticeKind == "info" || noticeKind == "tally"
 let noticeMessage = isNotice
     ? noticeArgs.dropFirst(hasExplicitDuration ? 2 : 1).joined(separator: " ")
     : nil
@@ -100,8 +135,11 @@ let height: CGFloat = isNotice ? 40 : 32
 let width: CGFloat = {
     guard let noticeMessage else { return 76 }
     let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 12, weight: .medium)]
-    let measured = NSString(string: noticeMessage).size(withAttributes: attributes).width + 56
-    return min(max(measured, 168), 340)
+    let measuredText = noticeKind == "tally"
+        ? noticeMessage.replacingOccurrences(of: "||", with: "  •  ")
+        : noticeMessage
+    let measured = NSString(string: measuredText).size(withAttributes: attributes).width + 62
+    return min(max(measured, 168), noticeKind == "tally" ? 420 : 340)
 }()
 let edgeInset: CGFloat = 22
 let origin = NSPoint(

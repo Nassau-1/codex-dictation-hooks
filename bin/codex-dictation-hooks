@@ -272,8 +272,59 @@ function showHudInfo(config, message, seconds = null) {
   showHudMessage(config, "info", message, seconds);
 }
 
+function showHudTally(config, addedMessage, totalMessage, seconds = null) {
+  showHudMessage(config, "tally", `${addedMessage}||${totalMessage}`, seconds);
+}
+
 function pluralize(count, singular, plural = `${singular}s`) {
   return count === 1 ? singular : plural;
+}
+
+function durationSetting(value, fallback) {
+  const duration = Number(value);
+  if (!Number.isFinite(duration)) return fallback;
+
+  return Math.max(0.8, Math.min(duration, 20));
+}
+
+function tallyHudOptions(config = {}) {
+  const raw = config.tallyHud && typeof config.tallyHud === "object" ? config.tallyHud : {};
+  const requestedMode = String(raw.mode || "sequence").toLocaleLowerCase();
+  const mode = requestedMode === "separate"
+    ? "sequence"
+    : ["sequence", "combined", "total", "off"].includes(requestedMode)
+      ? requestedMode
+      : "sequence";
+
+  return {
+    mode,
+    addedSeconds: durationSetting(raw.addedSeconds, 3),
+    totalSeconds: durationSetting(raw.totalSeconds, 5),
+    combinedSeconds: durationSetting(raw.combinedSeconds, 5),
+  };
+}
+
+function showTallyHud(config, tally) {
+  const options = tallyHudOptions(config);
+  if (options.mode === "off") return;
+
+  const addedMessage = `Added ${formatNumber(tally.wordCount)} ${pluralize(tally.wordCount, "word")}`;
+  const totalMessage = `${formatNumber(tally.totalWords)} words total`;
+
+  if (options.mode === "combined") {
+    showHudTally(config, addedMessage, totalMessage, options.combinedSeconds);
+    return;
+  }
+
+  if (options.mode === "total") {
+    showHudInfo(config, totalMessage, options.totalSeconds);
+    return;
+  }
+
+  showHudInfo(config, addedMessage, options.addedSeconds);
+  setTimeout(() => {
+    showHudInfo(config, totalMessage, options.totalSeconds);
+  }, options.addedSeconds * 1000);
 }
 
 function stopHud(child) {
@@ -358,10 +409,7 @@ function processLine(line) {
     const tally = addToTally(text);
     if (tally) {
       const config = readHooksConfig() || {};
-      showHudInfo(config, `Added ${formatNumber(tally.wordCount)} ${pluralize(tally.wordCount, "word")}`, 3);
-      setTimeout(() => {
-        showHudInfo(config, `${formatNumber(tally.totalWords)} words total`);
-      }, 3000);
+      showTallyHud(config, tally);
     }
     console.log(`[${new Date().toISOString()}] handled dictation: ${handledText}`);
   } catch (error) {

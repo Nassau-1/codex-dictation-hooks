@@ -74,7 +74,7 @@ The watcher counts words from each new transcript and stores the tally at:
 ~/.config/codex-dictation-hooks/stats.json
 ```
 
-After each handled transcript, a small native HUD flashes the total word count in the bottom-right corner.
+After each handled transcript, a small native HUD flashes word-count feedback in the bottom-right corner.
 
 View the tally:
 
@@ -93,6 +93,26 @@ Override the stats file if needed:
 ```zsh
 CODEX_DICTATION_STATS=/path/to/stats.json ./bin/codex-dictation-hooks watch
 ```
+
+Configure how tally notices appear in your hooks config:
+
+```json
+{
+  "tallyHud": {
+    "mode": "sequence",
+    "addedSeconds": 3,
+    "totalSeconds": 5,
+    "combinedSeconds": 5
+  }
+}
+```
+
+Modes:
+
+- `"sequence"` or `"separate"` shows `Added N words`, then the total.
+- `"combined"` shows both values in one slightly wider tally pill.
+- `"total"` only shows the total.
+- `"off"` hides tally notices.
 
 ## Deterministic Agent Hooks
 
