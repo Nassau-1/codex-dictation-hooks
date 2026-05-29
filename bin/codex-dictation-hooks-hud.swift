@@ -84,10 +84,16 @@ final class HookHudView: NSView {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
-let noticeKind = CommandLine.arguments.dropFirst().first ?? ""
+let noticeArgs = Array(CommandLine.arguments.dropFirst())
+let noticeKind = noticeArgs.first ?? ""
+let hasExplicitDuration = noticeArgs.count > 2 && TimeInterval(noticeArgs[1]) != nil
+let durationSeconds: TimeInterval = {
+    guard hasExplicitDuration, let duration = TimeInterval(noticeArgs[1]) else { return 5.0 }
+    return max(0.8, min(duration, 20.0))
+}()
 let isNotice = noticeKind == "error" || noticeKind == "info"
 let noticeMessage = isNotice
-    ? CommandLine.arguments.dropFirst(2).joined(separator: " ")
+    ? noticeArgs.dropFirst(hasExplicitDuration ? 2 : 1).joined(separator: " ")
     : nil
 let frame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
 let height: CGFloat = isNotice ? 40 : 32
@@ -120,7 +126,7 @@ window.contentView = HookHudView(frame: NSRect(x: 0, y: 0, width: width, height:
 window.orderFrontRegardless()
 
 if isNotice {
-    Timer.scheduledTimer(withTimeInterval: 3.2, repeats: false) { _ in
+    Timer.scheduledTimer(withTimeInterval: durationSeconds, repeats: false) { _ in
         NSApplication.shared.terminate(nil)
     }
 }

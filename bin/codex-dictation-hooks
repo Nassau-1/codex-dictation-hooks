@@ -255,8 +255,12 @@ function startHud(config = {}, args = []) {
   }
 }
 
-function showHudMessage(config, kind, message) {
-  const child = startHud(config, [kind, message]);
+function showHudMessage(config, kind, message, seconds = null) {
+  const args = [kind];
+  if (seconds !== null && seconds !== undefined) args.push(String(seconds));
+  args.push(message);
+
+  const child = startHud(config, args);
   if (child) child.unref();
 }
 
@@ -264,8 +268,12 @@ function showHudNotice(config, message) {
   showHudMessage(config, "error", message);
 }
 
-function showHudInfo(config, message) {
-  showHudMessage(config, "info", message);
+function showHudInfo(config, message, seconds = null) {
+  showHudMessage(config, "info", message, seconds);
+}
+
+function pluralize(count, singular, plural = `${singular}s`) {
+  return count === 1 ? singular : plural;
 }
 
 function stopHud(child) {
@@ -348,7 +356,13 @@ function processLine(line) {
     const handledText = maybeTransformText(text);
     runAction(handledText);
     const tally = addToTally(text);
-    if (tally) showHudInfo(readHooksConfig() || {}, `${formatNumber(tally.totalWords)} words total`);
+    if (tally) {
+      const config = readHooksConfig() || {};
+      showHudInfo(config, `Added ${formatNumber(tally.wordCount)} ${pluralize(tally.wordCount, "word")}`, 3);
+      setTimeout(() => {
+        showHudInfo(config, `${formatNumber(tally.totalWords)} words total`);
+      }, 3000);
+    }
     console.log(`[${new Date().toISOString()}] handled dictation: ${handledText}`);
   } catch (error) {
     console.error(`Failed to handle dictation: ${error.message}`);
