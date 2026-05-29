@@ -163,7 +163,7 @@ function maybeTransformText(text) {
   if (model) env.CODEX_DICTATION_MODEL = model;
   if (hook.name) env.CODEX_DICTATION_HOOK_NAME = String(hook.name);
 
-  const result = spawnSync(agentCommand, { input: prompt, encoding: "utf8", shell: true, env });
+  const result = spawnSync("zsh", ["-lc", agentCommand], { input: prompt, encoding: "utf8", env });
 
   if (result.error || result.status !== 0) {
     const detail = result.error?.message || result.stderr?.trim() || `exit ${result.status}`;
@@ -182,7 +182,7 @@ function maybeTransformText(text) {
 function runAction(text) {
   const action = process.env.CODEX_DICTATION_ACTION;
   const result = action
-    ? spawnSync(action, { input: text, encoding: "utf8", shell: true })
+    ? spawnSync("zsh", ["-lc", action], { input: text, encoding: "utf8" })
     : spawnSync("/usr/bin/pbcopy", { input: text, encoding: "utf8" });
 
   if (result.error) throw result.error;
@@ -348,7 +348,7 @@ function maybeTransformText(text) {
   if (model) env.CODEX_DICTATION_MODEL = model;
   if (hook.name) env.CODEX_DICTATION_HOOK_NAME = String(hook.name);
 
-  const result = spawnSync(agentCommand, { input: prompt, encoding: "utf8", shell: true, env });
+  const result = spawnSync("zsh", ["-lc", agentCommand], { input: prompt, encoding: "utf8", env });
   const transformed = result.status === 0 ? result.stdout.trim() : "";
 
   return transformed || text;
@@ -373,7 +373,7 @@ NODE
   [[ -z "$text" ]] && return
 
   if [[ -n "${CODEX_DICTATION_ACTION:-}" ]]; then
-    printf "%s" "$text" | zsh -c "$CODEX_DICTATION_ACTION"
+    printf "%s" "$text" | zsh -lc "$CODEX_DICTATION_ACTION"
   else
     printf "%s" "$text" | /usr/bin/pbcopy
   fi
