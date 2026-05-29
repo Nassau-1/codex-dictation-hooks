@@ -105,7 +105,42 @@ function findMatchingHook(text, hooks) {
 }
 
 function renderPrompt(template, text) {
-  return String(template || "{{text}}").replaceAll("{{text}}", text);
+  return String(template || "{{text}}")
+    .replaceAll("{{text}}", text)
+    .replaceAll("{{model}}", "");
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function selectedModel(config, hook) {
+  if (typeof hook.model === "string" && hook.model.trim()) return hook.model.trim();
+  if (typeof config.defaultModel === "string" && config.defaultModel.trim()) return config.defaultModel.trim();
+
+  return "";
+}
+
+function renderAgentCommand(command, model, config) {
+  let rendered = String(command || "");
+
+  if (model) {
+    rendered = rendered.replaceAll("{{model}}", shellQuote(model));
+
+    if (!String(command || "").includes("{{model}}") && typeof config.modelArgument === "string" && config.modelArgument.trim()) {
+      rendered = `${rendered} ${config.modelArgument.replaceAll("{{model}}", shellQuote(model))}`;
+    }
+  } else {
+    rendered = rendered.replaceAll("{{model}}", "");
+  }
+
+  return rendered;
+}
+
+function renderHookPrompt(template, text, model) {
+  return String(template || "{{text}}")
+    .replaceAll("{{text}}", text)
+    .replaceAll("{{model}}", model || "");
 }
 
 function maybeTransformText(text) {
@@ -115,14 +150,19 @@ function maybeTransformText(text) {
   const hook = findMatchingHook(text, config.hooks);
   if (!hook) return text;
 
-  const agentCommand = process.env.CODEX_DICTATION_AGENT_COMMAND || config.agentCommand;
+  const model = selectedModel(config, hook);
+  const agentCommand = renderAgentCommand(process.env.CODEX_DICTATION_AGENT_COMMAND || config.agentCommand, model, config);
   if (!commandExists(agentCommand)) {
     console.error(`Matched hook "${hook.name || "unnamed"}" but agent command is unavailable.`);
     return text;
   }
 
-  const prompt = renderPrompt(hook.prompt, text);
-  const result = spawnSync(agentCommand, { input: prompt, encoding: "utf8", shell: true });
+  const prompt = renderHookPrompt(hook.prompt, text, model);
+  const env = { ...process.env };
+  if (model) env.CODEX_DICTATION_MODEL = model;
+  if (hook.name) env.CODEX_DICTATION_HOOK_NAME = String(hook.name);
+
+  const result = spawnSync(agentCommand, { input: prompt, encoding: "utf8", shell: true, env });
 
   if (result.error || result.status !== 0) {
     const detail = result.error?.message || result.stderr?.trim() || `exit ${result.status}`;
@@ -133,7 +173,8 @@ function maybeTransformText(text) {
   const transformed = result.stdout.trim();
   if (!transformed) return text;
 
-  console.log(`[${new Date().toISOString()}] transformed dictation with hook: ${hook.name || "unnamed"}`);
+  const modelLabel = model ? ` using ${model}` : "";
+  console.log(`[${new Date().toISOString()}] transformed dictation with hook: ${hook.name || "unnamed"}${modelLabel}`);
   return transformed;
 }
 
@@ -252,7 +293,42 @@ function findMatchingHook(text, hooks) {
 }
 
 function renderPrompt(template, text) {
-  return String(template || "{{text}}").replaceAll("{{text}}", text);
+  return String(template || "{{text}}")
+    .replaceAll("{{text}}", text)
+    .replaceAll("{{model}}", "");
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function selectedModel(config, hook) {
+  if (typeof hook.model === "string" && hook.model.trim()) return hook.model.trim();
+  if (typeof config.defaultModel === "string" && config.defaultModel.trim()) return config.defaultModel.trim();
+
+  return "";
+}
+
+function renderAgentCommand(command, model, config) {
+  let rendered = String(command || "");
+
+  if (model) {
+    rendered = rendered.replaceAll("{{model}}", shellQuote(model));
+
+    if (!String(command || "").includes("{{model}}") && typeof config.modelArgument === "string" && config.modelArgument.trim()) {
+      rendered = `${rendered} ${config.modelArgument.replaceAll("{{model}}", shellQuote(model))}`;
+    }
+  } else {
+    rendered = rendered.replaceAll("{{model}}", "");
+  }
+
+  return rendered;
+}
+
+function renderHookPrompt(template, text, model) {
+  return String(template || "{{text}}")
+    .replaceAll("{{text}}", text)
+    .replaceAll("{{model}}", model || "");
 }
 
 function maybeTransformText(text) {
@@ -262,11 +338,16 @@ function maybeTransformText(text) {
   const hook = findMatchingHook(text, config.hooks);
   if (!hook) return text;
 
-  const agentCommand = process.env.CODEX_DICTATION_AGENT_COMMAND || config.agentCommand;
+  const model = selectedModel(config, hook);
+  const agentCommand = renderAgentCommand(process.env.CODEX_DICTATION_AGENT_COMMAND || config.agentCommand, model, config);
   if (!commandExists(agentCommand)) return text;
 
-  const prompt = renderPrompt(hook.prompt, text);
-  const result = spawnSync(agentCommand, { input: prompt, encoding: "utf8", shell: true });
+  const prompt = renderHookPrompt(hook.prompt, text, model);
+  const env = { ...process.env };
+  if (model) env.CODEX_DICTATION_MODEL = model;
+  if (hook.name) env.CODEX_DICTATION_HOOK_NAME = String(hook.name);
+
+  const result = spawnSync(agentCommand, { input: prompt, encoding: "utf8", shell: true, env });
   const transformed = result.status === 0 ? result.stdout.trim() : "";
 
   return transformed || text;

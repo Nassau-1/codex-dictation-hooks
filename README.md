@@ -74,7 +74,8 @@ cp config/hooks.example.json config/hooks.json
 
 ```json
 {
-  "agentCommand": "pi",
+  "agentCommand": "pi --model {{model}}",
+  "defaultModel": "gpt-5-codex",
   "hooks": [
     {
       "name": "email",
@@ -88,6 +89,23 @@ cp config/hooks.example.json config/hooks.json
 Matching is case-insensitive and uses simple phrase inclusion. If a phrase matches and the configured agent command is installed, the transcript is rewritten before the action runs. If there is no matching hook, no config file, no agent command, or the agent fails, the original transcript is used unchanged.
 
 The agent command receives the rendered prompt on standard input. Its standard output becomes the replacement transcript.
+
+Models can be configured globally with `defaultModel` or per hook with `model`. The selected model is available as:
+
+- `{{model}}` in `agentCommand`
+- `{{model}}` in `prompt`
+- `CODEX_DICTATION_MODEL` in the agent command environment
+
+If your agent command does not include `{{model}}`, you can also set `modelArgument`, for example:
+
+```json
+{
+  "agentCommand": "pi",
+  "defaultModel": "gpt-5-codex",
+  "modelArgument": "--model {{model}}",
+  "hooks": []
+}
+```
 
 You can also point at a different config:
 

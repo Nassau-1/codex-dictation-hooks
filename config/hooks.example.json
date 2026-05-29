@@ -1,5 +1,6 @@
 {
-  "agentCommand": "pi",
+  "agentCommand": "pi --model {{model}}",
+  "defaultModel": "gpt-5-codex",
   "hooks": [
     {
       "name": "email",
@@ -9,6 +10,7 @@
     {
       "name": "format",
       "phrases": ["format this", "clean this up"],
+      "model": "gpt-5",
       "prompt": "Clean up the dictation below while preserving its meaning. Return only the cleaned text.\n\n{{text}}"
     }
   ]
