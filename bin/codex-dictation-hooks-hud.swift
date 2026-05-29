@@ -4,9 +4,11 @@ final class HookHudView: NSView {
     private var phase = 0
     private var timer: Timer?
     private let message: String?
+    private let noticeKind: String
 
-    init(frame frameRect: NSRect, message: String? = nil) {
+    init(frame frameRect: NSRect, message: String? = nil, noticeKind: String = "info") {
         self.message = message
+        self.noticeKind = noticeKind
         super.init(frame: frameRect)
         wantsLayer = true
         if message == nil {
@@ -64,7 +66,10 @@ final class HookHudView: NSView {
     private func drawNotice(_ message: String, in rect: NSRect) {
         let dotDiameter: CGFloat = 7
         let dotRect = NSRect(x: rect.minX + 14, y: rect.midY - dotDiameter / 2, width: dotDiameter, height: dotDiameter)
-        NSColor.systemOrange.withAlphaComponent(0.9).setFill()
+        let dotColor = noticeKind == "error"
+            ? NSColor.systemOrange.withAlphaComponent(0.9)
+            : NSColor.controlAccentColor.withAlphaComponent(0.85)
+        dotColor.setFill()
         NSBezierPath(ovalIn: dotRect).fill()
 
         let attributes: [NSAttributedString.Key: Any] = [
@@ -79,7 +84,8 @@ final class HookHudView: NSView {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
-let isNotice = CommandLine.arguments.dropFirst().first == "error"
+let noticeKind = CommandLine.arguments.dropFirst().first ?? ""
+let isNotice = noticeKind == "error" || noticeKind == "info"
 let noticeMessage = isNotice
     ? CommandLine.arguments.dropFirst(2).joined(separator: " ")
     : nil
@@ -110,7 +116,7 @@ window.hasShadow = false
 window.level = .floating
 window.ignoresMouseEvents = true
 window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
-window.contentView = HookHudView(frame: NSRect(x: 0, y: 0, width: width, height: height), message: noticeMessage)
+window.contentView = HookHudView(frame: NSRect(x: 0, y: 0, width: width, height: height), message: noticeMessage, noticeKind: noticeKind)
 window.orderFrontRegardless()
 
 if isNotice {

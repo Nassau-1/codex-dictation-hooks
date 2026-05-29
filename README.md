@@ -44,6 +44,8 @@ Then trigger a new Codex global dictation. You should see a log line when the ne
 ./bin/codex-dictation-hooks uninstall   # stop and remove the LaunchAgent
 ./bin/codex-dictation-hooks status      # show LaunchAgent status
 ./bin/codex-dictation-hooks latest      # run the default action for the latest existing dictation
+./bin/codex-dictation-hooks tally       # show tracked word totals
+./bin/codex-dictation-hooks import-tally 25000
 ```
 
 ## Configuration
@@ -63,6 +65,34 @@ CODEX_DICTATION_ACTION="/path/to/your-action" ./bin/codex-dictation-hooks watch
 The transcript is passed to the action on standard input, so the action can format, rewrite, route, or store it.
 
 When a deterministic hook runs, a small native macOS processing HUD appears until the agent returns. Set `"showHud": false` in your hooks config, or run with `CODEX_DICTATION_HUD=0`, to disable it.
+
+## Word Tally
+
+The watcher counts words from each new transcript and stores the tally at:
+
+```text
+~/.config/codex-dictation-hooks/stats.json
+```
+
+After each handled transcript, a small native HUD flashes the total word count in the bottom-right corner.
+
+View the tally:
+
+```zsh
+./bin/codex-dictation-hooks tally
+```
+
+Import a starting baseline from another system:
+
+```zsh
+./bin/codex-dictation-hooks import-tally 25000
+```
+
+Override the stats file if needed:
+
+```zsh
+CODEX_DICTATION_STATS=/path/to/stats.json ./bin/codex-dictation-hooks watch
+```
 
 ## Deterministic Agent Hooks
 

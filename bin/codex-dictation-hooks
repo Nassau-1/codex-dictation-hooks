@@ -5,6 +5,7 @@ label="com.hcassar93.codex-dictation-hooks"
 install_path="$HOME/.local/bin/codex-dictation-hooks"
 plist_path="$HOME/Library/LaunchAgents/$label.plist"
 history_file="${CODEX_DICTATION_HISTORY:-$HOME/.codex/transcription-history.jsonl}"
+stats_file="${CODEX_DICTATION_STATS:-$HOME/.config/codex-dictation-hooks/stats.json}"
 log_dir="$HOME/.codex/log"
 stdout_log="$log_dir/codex-dictation-hooks.out.log"
 stderr_log="$log_dir/codex-dictation-hooks.err.log"
@@ -59,12 +60,14 @@ watch_history() {
   local node_bin
   node_bin="$(find_node)"
 
-  CODEX_DICTATION_HOOKS_CONFIG="$hooks_config" CODEX_DICTATION_HUD_PATH="$hud_path" "$node_bin" - "$history_file" <<'NODE'
+  CODEX_DICTATION_HOOKS_CONFIG="$hooks_config" CODEX_DICTATION_HUD_PATH="$hud_path" CODEX_DICTATION_STATS="$stats_file" "$node_bin" - "$history_file" <<'NODE'
 const fs = require("fs");
+const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 
 const historyFile = process.argv[2];
 const hooksConfigPath = process.env.CODEX_DICTATION_HOOKS_CONFIG;
+const statsPath = process.env.CODEX_DICTATION_STATS;
 let offset = fs.statSync(historyFile).size;
 let buffer = "";
 let hooksConfigCache = { mtimeMs: null, config: null };
@@ -83,8 +86,9 @@ function commandExists(command) {
 function readHooksConfig() {
   if (!hooksConfigPath || !fs.existsSync(hooksConfigPath)) return null;
 
+  let stat;
   try {
-    const stat = fs.statSync(hooksConfigPath);
+    stat = fs.statSync(hooksConfigPath);
     if (hooksConfigCache.mtimeMs === stat.mtimeMs) return hooksConfigCache.config;
 
     const parsed = JSON.parse(fs.readFileSync(hooksConfigPath, "utf8"));
@@ -92,12 +96,83 @@ function readHooksConfig() {
     return parsed;
   } catch (error) {
     console.error(`Failed to read hooks config: ${error.message}`);
-    if (hooksConfigCache.mtimeMs !== stat.mtimeMs) {
+    if (!stat || hooksConfigCache.mtimeMs !== stat.mtimeMs) {
       showHudNotice({}, "Hooks config invalid");
     }
-    hooksConfigCache = { mtimeMs: stat.mtimeMs, config: null };
+    hooksConfigCache = { mtimeMs: stat ? stat.mtimeMs : null, config: null };
     return null;
   }
+}
+
+function formatNumber(value) {
+  return new Intl.NumberFormat().format(value);
+}
+
+function countWords(text) {
+  const matches = String(text).match(/[\p{L}\p{N}]+(?:[’'][\p{L}\p{N}]+)*/gu);
+  return matches ? matches.length : 0;
+}
+
+function defaultStats() {
+  return {
+    baseWords: 0,
+    transcribedWords: 0,
+    totalWords: 0,
+    entries: 0,
+    updatedAt: null,
+  };
+}
+
+function normalizeCount(value) {
+  const count = Number(value);
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
+}
+
+function normalizeStats(stats) {
+  const normalized = defaultStats();
+  if (stats && typeof stats === "object") {
+    normalized.baseWords = normalizeCount(stats.baseWords);
+    normalized.transcribedWords = normalizeCount(stats.transcribedWords);
+    normalized.entries = normalizeCount(stats.entries);
+    normalized.updatedAt = typeof stats.updatedAt === "string" ? stats.updatedAt : null;
+  }
+  normalized.totalWords = normalized.baseWords + normalized.transcribedWords;
+  return normalized;
+}
+
+function readStats() {
+  if (!statsPath || !fs.existsSync(statsPath)) return defaultStats();
+
+  try {
+    return normalizeStats(JSON.parse(fs.readFileSync(statsPath, "utf8")));
+  } catch (error) {
+    console.error(`Failed to read tally: ${error.message}`);
+    showHudNotice({}, "Tally file invalid");
+    return defaultStats();
+  }
+}
+
+function writeStats(stats) {
+  if (!statsPath) return;
+
+  fs.mkdirSync(path.dirname(statsPath), { recursive: true });
+  const tmpPath = `${statsPath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmpPath, `${JSON.stringify(stats, null, 2)}\n`);
+  fs.renameSync(tmpPath, statsPath);
+}
+
+function addToTally(text) {
+  const wordCount = countWords(text);
+  if (!wordCount) return null;
+
+  const stats = readStats();
+  stats.transcribedWords += wordCount;
+  stats.entries += 1;
+  stats.totalWords = stats.baseWords + stats.transcribedWords;
+  stats.updatedAt = new Date().toISOString();
+  writeStats(stats);
+
+  return { wordCount, totalWords: stats.totalWords };
 }
 
 function findMatchingHook(text, hooks) {
@@ -180,9 +255,17 @@ function startHud(config = {}, args = []) {
   }
 }
 
-function showHudNotice(config, message) {
-  const child = startHud(config, ["error", message]);
+function showHudMessage(config, kind, message) {
+  const child = startHud(config, [kind, message]);
   if (child) child.unref();
+}
+
+function showHudNotice(config, message) {
+  showHudMessage(config, "error", message);
+}
+
+function showHudInfo(config, message) {
+  showHudMessage(config, "info", message);
 }
 
 function stopHud(child) {
@@ -264,6 +347,8 @@ function processLine(line) {
   try {
     const handledText = maybeTransformText(text);
     runAction(handledText);
+    const tally = addToTally(text);
+    if (tally) showHudInfo(readHooksConfig() || {}, `${formatNumber(tally.totalWords)} words total`);
     console.log(`[${new Date().toISOString()}] handled dictation: ${handledText}`);
   } catch (error) {
     console.error(`Failed to handle dictation: ${error.message}`);
@@ -497,6 +582,95 @@ NODE
   fi
 }
 
+tally_command() {
+  local command="${1:-view}"
+  local value="${2:-}"
+  local node_bin
+  node_bin="$(find_node)"
+
+  "$node_bin" - "$stats_file" "$command" "$value" <<'NODE'
+const fs = require("fs");
+const path = require("path");
+
+const statsPath = process.argv[2];
+const command = process.argv[3] || "view";
+const value = process.argv[4] || "";
+
+function defaultStats() {
+  return {
+    baseWords: 0,
+    transcribedWords: 0,
+    totalWords: 0,
+    entries: 0,
+    updatedAt: null,
+  };
+}
+
+function normalizeCount(raw) {
+  if (raw === null || raw === undefined || String(raw).trim() === "") return null;
+  const count = Number(raw);
+  return Number.isFinite(count) && count >= 0 ? Math.floor(count) : null;
+}
+
+function normalizeStats(stats) {
+  const normalized = defaultStats();
+  if (stats && typeof stats === "object") {
+    normalized.baseWords = normalizeCount(stats.baseWords) ?? 0;
+    normalized.transcribedWords = normalizeCount(stats.transcribedWords) ?? 0;
+    normalized.entries = normalizeCount(stats.entries) ?? 0;
+    normalized.updatedAt = typeof stats.updatedAt === "string" ? stats.updatedAt : null;
+  }
+  normalized.totalWords = normalized.baseWords + normalized.transcribedWords;
+  return normalized;
+}
+
+function readStats() {
+  if (!fs.existsSync(statsPath)) return defaultStats();
+  return normalizeStats(JSON.parse(fs.readFileSync(statsPath, "utf8")));
+}
+
+function writeStats(stats) {
+  fs.mkdirSync(path.dirname(statsPath), { recursive: true });
+  const tmpPath = `${statsPath}.${process.pid}.tmp`;
+  fs.writeFileSync(tmpPath, `${JSON.stringify(stats, null, 2)}\n`);
+  fs.renameSync(tmpPath, statsPath);
+}
+
+function formatNumber(count) {
+  return new Intl.NumberFormat().format(count);
+}
+
+function printStats(stats) {
+  console.log(`Total words: ${formatNumber(stats.totalWords)}`);
+  console.log(`Base words: ${formatNumber(stats.baseWords)}`);
+  console.log(`Tracked words: ${formatNumber(stats.transcribedWords)}`);
+  console.log(`Entries: ${formatNumber(stats.entries)}`);
+  if (stats.updatedAt) console.log(`Updated: ${stats.updatedAt}`);
+  console.log(`File: ${statsPath}`);
+}
+
+if (command === "view") {
+  printStats(readStats());
+} else if (command === "import") {
+  const baseWords = normalizeCount(value);
+  if (baseWords === null) {
+    console.error("Usage: codex-dictation-hooks import-tally <non-negative-word-count>");
+    process.exit(2);
+  }
+
+  const stats = readStats();
+  stats.baseWords = baseWords;
+  stats.totalWords = stats.baseWords + stats.transcribedWords;
+  stats.updatedAt = new Date().toISOString();
+  writeStats(stats);
+  printStats(stats);
+} else {
+  console.error("Usage: codex-dictation-hooks tally | import-tally <word-count>");
+  process.exit(2);
+}
+NODE
+}
+
 install_agent() {
   mkdir -p "$(dirname "$install_path")" "$HOME/Library/LaunchAgents" "$log_dir"
   cp "$script_path" "$install_path"
@@ -569,8 +743,14 @@ case "${1:-watch}" in
   latest)
     handle_latest
     ;;
+  tally)
+    tally_command view
+    ;;
+  import-tally)
+    tally_command import "${2:-}"
+    ;;
   *)
-    printf "Usage: %s [watch|install|uninstall|status|latest]\n" "$0" >&2
+    printf "Usage: %s [watch|install|uninstall|status|latest|tally|import-tally <word-count>]\n" "$0" >&2
     exit 2
     ;;
 esac
