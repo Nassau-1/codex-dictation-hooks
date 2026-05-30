@@ -12,6 +12,16 @@ Codex stores global dictation history at:
 
 This tool watches that file for new JSONL entries and runs an action whenever a new transcript appears. The default action sends the newest transcript to the active macOS text buffer.
 
+## Screenshots
+
+Native macOS HUD previews for the hook processing state, word tally counter, and status notice:
+
+<p>
+  <img src="assets/screenshots/processing-hud.png" alt="Processing HUD with animated dots" width="300">
+  <img src="assets/screenshots/tally-hud.png" alt="Word tally HUD showing added and total words" width="420">
+  <img src="assets/screenshots/notice-hud.png" alt="Hook status HUD showing a processed transcript notice" width="360">
+</p>
+
 ## Install
 
 Clone the repo and run:
