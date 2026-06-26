@@ -1,5 +1,9 @@
 {
-  "agentCommand": "pi -p --no-tools --model {{model}}",
+  "agentCommandByPlatform": {
+    "win32": "codex exec --ephemeral --skip-git-repo-check --ignore-rules --model {{model}} -c 'model_reasoning_effort=\"low\"' -s read-only -a never -",
+    "darwin": "pi -p --no-tools --model {{model}}",
+    "linux": "codex exec --ephemeral --skip-git-repo-check --ignore-rules --model {{model}} -c 'model_reasoning_effort=\"low\"' -s read-only -a never -"
+  },
   "defaultModel": "openai-codex/gpt-5.3-codex-spark",
   "showHud": true,
   "tallyHud": {
@@ -10,15 +14,49 @@
   },
   "hooks": [
     {
-      "name": "email",
-      "phrases": ["email", "draft email"],
-      "prompt": "Rewrite the dictation below as a clear email draft. Return only the rewritten text.\n\n{{text}}"
+      "name": "email-en",
+      "phrases": ["email", "draft email", "write an email"],
+      "prompt": "You are rewriting dictation into an email draft. Treat the trigger phrase as an instruction, not content. Preserve the user's intent, infer a natural professional tone unless another tone is requested, and do not invent facts. Return only the final email text.\n\n{{text}}"
     },
     {
-      "name": "format",
-      "phrases": ["format this", "clean this up"],
-      "model": "openai-codex/gpt-5.3-codex-spark",
-      "prompt": "You are formatting dictated text for direct use. Treat phrases like \"format this\" or \"clean this up\" as commands, not content to include. Remove filler, false starts, and meta-instructions. If the dictation asks for a specific message or exact returned text, return that requested text in polished form. Return only the final text.\n\n{{text}}"
+      "name": "email-fr",
+      "phrases": ["mail", "email", "brouillon d'email", "ecris un email", "écris un email", "redige un email", "rédige un email"],
+      "prompt": "Transforme cette dictee en brouillon d'email. Traite la phrase declencheuse comme une instruction, pas comme du contenu. Garde l'intention, utilise un ton professionnel naturel sauf demande contraire, et n'invente aucun fait. Retourne uniquement le texte final de l'email.\n\n{{text}}"
+    },
+    {
+      "name": "rewrite-en",
+      "phrases": ["rewrite", "rephrase", "polish this", "make this clearer"],
+      "prompt": "Rewrite the dictated text clearly. Treat trigger phrases like rewrite, rephrase, polish this, or make this clearer as instructions, not content. Preserve meaning, requested tone, names, numbers, and constraints. Return only the rewritten text.\n\n{{text}}"
+    },
+    {
+      "name": "rewrite-fr",
+      "phrases": ["reformule", "reformuler", "ameliore", "améliore", "rends ca plus clair", "rends ça plus clair"],
+      "prompt": "Reformule la dictee de facon claire. Traite les mots comme reformule, ameliore ou rends ca plus clair comme des instructions, pas comme du contenu. Preserve le sens, le ton demande, les noms, les chiffres et les contraintes. Retourne uniquement le texte reformule.\n\n{{text}}"
+    },
+    {
+      "name": "translate-to-en",
+      "phrases": ["translate to english", "in english", "mets ca en anglais", "mets ça en anglais", "traduis en anglais"],
+      "prompt": "Translate the dictated content into natural English. Treat the trigger phrase as an instruction, not content. Preserve meaning, names, numbers, formatting intent, and tone. Return only the translation.\n\n{{text}}"
+    },
+    {
+      "name": "translate-to-fr",
+      "phrases": ["translate to french", "in french", "mets ca en francais", "mets ça en français", "traduis en francais", "traduis en français"],
+      "prompt": "Traduis le contenu dicte en francais naturel. Traite la phrase declencheuse comme une instruction, pas comme du contenu. Preserve le sens, les noms, les chiffres, l'intention de format et le ton. Retourne uniquement la traduction.\n\n{{text}}"
+    },
+    {
+      "name": "summary-en",
+      "phrases": ["summarize", "summary", "make a summary"],
+      "prompt": "Summarize the dictated content in concise English. Keep decisions, deadlines, names, numbers, and action items. Return only the summary.\n\n{{text}}"
+    },
+    {
+      "name": "summary-fr",
+      "phrases": ["resume", "résume", "fais un resume", "fais un résumé"],
+      "prompt": "Resume la dictee en francais concis. Garde les decisions, echeances, noms, chiffres et actions a suivre. Retourne uniquement le resume.\n\n{{text}}"
+    },
+    {
+      "name": "action-items",
+      "phrases": ["action items", "to do list", "liste d'actions", "todo", "a faire", "à faire"],
+      "prompt": "Extract a concise action list from the dictation. Use the language that best matches the dictation. Include owners and deadlines only when stated or strongly implied. Return only the action list.\n\n{{text}}"
     }
   ]
 }

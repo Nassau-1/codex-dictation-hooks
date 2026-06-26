@@ -1,6 +1,8 @@
 # Codex Dictation Hooks
 
-Automation hooks for Codex dictation on macOS with launchd. Watch new transcripts and run local actions automatically.
+Automation hooks for Codex dictation on Windows and macOS. The watcher reads new Codex dictation transcripts, optionally rewrites them with a cheap/low-effort Codex agent hook, then sends the final text to the clipboard or to a custom local action.
+
+The original project was macOS-first. This fork keeps macOS support and adds Windows support with PowerShell wrappers and a Scheduled Task installer.
 
 ## What it does
 
@@ -10,27 +12,69 @@ Codex stores global dictation history at:
 ~/.codex/transcription-history.jsonl
 ```
 
-This tool watches that file for new JSONL entries and runs an action whenever a new transcript appears. The default action sends the newest transcript to the active macOS text buffer.
+This tool watches that JSONL file for new transcript entries. For each transcript it:
 
-## Screenshots
+1. checks whether a configured trigger phrase matches;
+2. runs the matching deterministic hook, if any;
+3. copies the final text to the clipboard by default;
+4. updates the local word tally.
 
-Native macOS HUD previews for the hook processing state, word tally counter, and status notice:
+On Windows, the default action uses `Set-Clipboard`. On macOS, the default action uses `pbcopy`.
 
-<p>
-  <img src="assets/screenshots/processing-hud.png" alt="Processing HUD with animated dots" width="300">
-  <img src="assets/screenshots/tally-hud.png" alt="Word tally HUD showing added and total words" width="420">
-  <img src="assets/screenshots/notice-hud.png" alt="Hook status HUD showing a processed transcript notice" width="360">
-</p>
+## Windows install
 
-## Install
+From PowerShell:
 
-Clone the repo and run:
+```powershell
+git clone https://github.com/Nassau-1/codex-dictation-hooks.git
+cd codex-dictation-hooks
+Copy-Item config\hooks.example.json config\hooks.json
+.\bin\codex-dictation-hooks.ps1 install
+```
+
+The installer copies the runnable files to:
+
+```text
+%LOCALAPPDATA%\codex-dictation-hooks\
+```
+
+and registers a Windows Scheduled Task named:
+
+```text
+CodexDictationHooks
+```
+
+The task starts at logon and is started immediately after install. If Windows blocks user Scheduled Task registration, the installer falls back to a hidden user Startup script at:
+
+```text
+%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\CodexDictationHooks.vbs
+```
+
+That fallback starts the same watcher at login without requiring administrator rights.
+
+Useful Windows commands:
+
+```powershell
+.\bin\codex-dictation-hooks.ps1 watch
+.\bin\codex-dictation-hooks.ps1 latest
+.\bin\codex-dictation-hooks.ps1 status
+.\bin\codex-dictation-hooks.ps1 uninstall
+.\bin\codex-dictation-hooks.ps1 tally
+.\bin\codex-dictation-hooks.ps1 import-tally 25000
+```
+
+## macOS install
+
+From zsh:
 
 ```zsh
+git clone https://github.com/Nassau-1/codex-dictation-hooks.git
+cd codex-dictation-hooks
+cp config/hooks.example.json config/hooks.json
 ./bin/codex-dictation-hooks install
 ```
 
-The installer copies the script to `~/.local/bin/codex-dictation-hooks`, creates a LaunchAgent at:
+The macOS installer copies the script to `~/.local/bin/codex-dictation-hooks`, creates a LaunchAgent at:
 
 ```text
 ~/Library/LaunchAgents/com.hcassar93.codex-dictation-hooks.plist
@@ -40,43 +84,101 @@ and starts it immediately.
 
 ## Test in the foreground
 
+Windows:
+
+```powershell
+.\bin\codex-dictation-hooks.ps1 watch
+```
+
+macOS:
+
 ```zsh
 ./bin/codex-dictation-hooks watch
 ```
 
 Then trigger a new Codex global dictation. You should see a log line when the new transcript is handled.
 
-## Commands
+## Configuration
 
-```zsh
-./bin/codex-dictation-hooks watch       # watch the history file
-./bin/codex-dictation-hooks install     # install and start at login
-./bin/codex-dictation-hooks uninstall   # stop and remove the LaunchAgent
-./bin/codex-dictation-hooks status      # show LaunchAgent status
-./bin/codex-dictation-hooks latest      # run the default action for the latest existing dictation
-./bin/codex-dictation-hooks tally       # show tracked word totals
-./bin/codex-dictation-hooks import-tally 25000
+Create a local hooks file:
+
+```powershell
+Copy-Item config\hooks.example.json config\hooks.json
 ```
 
-## Configuration
+`config/hooks.json` is ignored by git. You can also use the per-user location:
+
+```text
+~/.config/codex-dictation-hooks/hooks.json
+```
+
+or point to another config file:
+
+```powershell
+$env:CODEX_DICTATION_HOOKS_CONFIG = "C:\path\to\hooks.json"
+.\bin\codex-dictation-hooks.ps1 watch
+```
 
 Override the history file if needed:
 
-```zsh
-CODEX_DICTATION_HISTORY=/path/to/transcription-history.jsonl ./bin/codex-dictation-hooks watch
+```powershell
+$env:CODEX_DICTATION_HISTORY = "C:\path\to\transcription-history.jsonl"
+.\bin\codex-dictation-hooks.ps1 watch
 ```
 
-Run a custom action instead of the default pasteboard action:
+Run a custom action instead of the default clipboard action:
 
-```zsh
-CODEX_DICTATION_ACTION="/path/to/your-action" ./bin/codex-dictation-hooks watch
+```powershell
+$env:CODEX_DICTATION_ACTION = "Set-Content -Path C:\tmp\last-dictation.txt"
+.\bin\codex-dictation-hooks.ps1 watch
 ```
 
-The transcript is passed to the action on standard input, so the action can format, rewrite, route, or store it.
+The final text is passed to the action on standard input.
 
-When a deterministic hook runs, a small native macOS processing HUD appears until the agent returns. Set `"showHud": false` in your hooks config, or run with `CODEX_DICTATION_HUD=0`, to disable it.
+## Low-cost Codex hooks
 
-## Word Tally
+`config/hooks.example.json` defaults Windows and Linux hooks to:
+
+```text
+codex exec --ephemeral --skip-git-repo-check --ignore-rules --model {{model}} -c 'model_reasoning_effort="low"' -s read-only -a never -
+```
+
+The default model is:
+
+```text
+openai-codex/gpt-5.3-codex-spark
+```
+
+The command is intentionally configurable. If your local Codex CLI or model catalog changes, edit `defaultModel` or `agentCommandByPlatform.win32` in `config/hooks.json`.
+
+Each hook has deterministic trigger phrases and a prompt template. Matching is case-insensitive and uses simple phrase inclusion. If a phrase matches and the configured agent command is available, the transcript is rewritten before the action runs. If there is no matching hook, no config file, no agent command, or the agent fails, the original transcript is used unchanged.
+
+The included hooks cover English and French:
+
+- email drafts;
+- reformulation and cleanup;
+- translation to English;
+- translation to French;
+- summaries;
+- action lists.
+
+The selected model is available as:
+
+- `{{model}}` in `agentCommandByPlatform`, `agentCommand`, and `prompt`;
+- `CODEX_DICTATION_MODEL` in the agent command environment.
+
+You can set a model per hook:
+
+```json
+{
+  "name": "email-fr",
+  "phrases": ["brouillon d'email"],
+  "model": "openai-codex/gpt-5.3-codex-spark",
+  "prompt": "Transforme cette dictee en brouillon d'email. Retourne uniquement le texte final.\n\n{{text}}"
+}
+```
+
+## Word tally
 
 The watcher counts words from each new transcript and stores the tally at:
 
@@ -84,97 +186,31 @@ The watcher counts words from each new transcript and stores the tally at:
 ~/.config/codex-dictation-hooks/stats.json
 ```
 
-After each handled transcript, a small native HUD flashes word-count feedback in the bottom-right corner.
-
 View the tally:
 
-```zsh
-./bin/codex-dictation-hooks tally
+```powershell
+.\bin\codex-dictation-hooks.ps1 tally
 ```
 
 Import a starting baseline from another system:
 
-```zsh
-./bin/codex-dictation-hooks import-tally 25000
+```powershell
+.\bin\codex-dictation-hooks.ps1 import-tally 25000
 ```
 
 Override the stats file if needed:
 
-```zsh
-CODEX_DICTATION_STATS=/path/to/stats.json ./bin/codex-dictation-hooks watch
+```powershell
+$env:CODEX_DICTATION_STATS = "C:\path\to\stats.json"
+.\bin\codex-dictation-hooks.ps1 watch
 ```
 
-Configure how tally notices appear in your hooks config:
+## macOS HUD
 
-```json
-{
-  "tallyHud": {
-    "mode": "sequence",
-    "addedSeconds": 3,
-    "totalSeconds": 5,
-    "combinedSeconds": 5
-  }
-}
-```
+The native Swift HUD remains macOS-only. Set `"showHud": false` in your hooks config, or run with `CODEX_DICTATION_HUD=0`, to disable it.
 
-Modes:
-
-- `"sequence"` or `"separate"` shows `Added N words`, then the total.
-- `"combined"` shows both values in one slightly wider tally pill.
-- `"total"` only shows the total.
-- `"off"` hides tally notices.
-
-## Deterministic Agent Hooks
-
-Create a local hooks file in the repo:
-
-```zsh
-cp config/hooks.example.json config/hooks.json
-```
-
-`config/hooks.json` is ignored by git. Each hook has deterministic trigger phrases and a prompt template:
-
-```json
-{
-  "agentCommand": "pi -p --no-tools --model {{model}}",
-  "defaultModel": "openai-codex/gpt-5.3-codex-spark",
-  "hooks": [
-    {
-      "name": "email",
-      "phrases": ["email", "draft email"],
-      "prompt": "Rewrite this as a clear email draft. Return only the rewritten text.\n\n{{text}}"
-    }
-  ]
-}
-```
-
-Matching is case-insensitive and uses simple phrase inclusion. If a phrase matches and the configured agent command is installed, the transcript is rewritten before the action runs. If there is no matching hook, no config file, no agent command, or the agent fails, the original transcript is used unchanged.
-
-The agent command receives the rendered prompt on standard input. Its standard output becomes the replacement transcript.
-
-Models can be configured globally with `defaultModel` or per hook with `model`. The selected model is available as:
-
-- `{{model}}` in `agentCommand`
-- `{{model}}` in `prompt`
-- `CODEX_DICTATION_MODEL` in the agent command environment
-
-If your agent command does not include `{{model}}`, you can also set `modelArgument`, for example:
-
-```json
-{
-  "agentCommand": "pi",
-  "defaultModel": "openai-codex/gpt-5.3-codex-spark",
-  "modelArgument": "-p --no-tools --model {{model}}",
-  "hooks": []
-}
-```
-
-You can also point at a different config:
-
-```zsh
-CODEX_DICTATION_HOOKS_CONFIG=/path/to/hooks.json ./bin/codex-dictation-hooks watch
-```
+On Windows, hook processing is intentionally silent except for terminal logs and Scheduled Task status.
 
 ## License
 
-MIT
+MIT. This fork preserves the upstream license.
