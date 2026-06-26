@@ -2,6 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $cli = Join-Path $repoRoot "bin\codex-dictation-hooks.ps1"
+$zshWrapper = Join-Path $repoRoot "bin\codex-dictation-hooks"
 $nodeScript = Join-Path $repoRoot "bin\codex-dictation-hooks.js"
 $configExample = Join-Path $repoRoot "config\hooks.example.json"
 $installer = Join-Path $repoRoot "install-windows.ps1"
@@ -29,6 +30,18 @@ $null = [System.Management.Automation.Language.Parser]::ParseFile($installer, [r
 if ($errors.Count -gt 0) {
   $errors | Format-List
   throw "install-windows.ps1 has parse errors."
+}
+
+Write-Step "Checking macOS preservation markers"
+$zshContent = Get-Content -Raw $zshWrapper
+$nodeContent = Get-Content -Raw $nodeScript
+if ($zshContent -notmatch "#!/bin/zsh" -or $zshContent -notmatch "codex-dictation-hooks\.js") {
+  throw "macOS zsh wrapper no longer delegates to the shared Node core."
+}
+foreach ($marker in @("launchctl", "/usr/bin/pbcopy", "codex-dictation-hooks-hud.swift")) {
+  if ($nodeContent -notmatch [regex]::Escape($marker)) {
+    throw "Missing macOS preservation marker: $marker"
+  }
 }
 
 Write-Step "Checking doctor command"
