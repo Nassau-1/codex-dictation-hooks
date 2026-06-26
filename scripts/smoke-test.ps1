@@ -4,6 +4,7 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $cli = Join-Path $repoRoot "bin\codex-dictation-hooks.ps1"
 $zshWrapper = Join-Path $repoRoot "bin\codex-dictation-hooks"
 $nodeScript = Join-Path $repoRoot "bin\codex-dictation-hooks.js"
+$winHud = Join-Path $repoRoot "bin\codex-dictation-hooks-win-hud.ps1"
 $configExample = Join-Path $repoRoot "config\hooks.example.json"
 $installer = Join-Path $repoRoot "install-windows.ps1"
 
@@ -32,6 +33,15 @@ if ($errors.Count -gt 0) {
   throw "install-windows.ps1 has parse errors."
 }
 
+Write-Step "Checking Windows HUD syntax"
+$tokens = $null
+$errors = $null
+$null = [System.Management.Automation.Language.Parser]::ParseFile($winHud, [ref] $tokens, [ref] $errors)
+if ($errors.Count -gt 0) {
+  $errors | Format-List
+  throw "codex-dictation-hooks-win-hud.ps1 has parse errors."
+}
+
 Write-Step "Checking macOS preservation markers"
 $zshContent = Get-Content -Raw $zshWrapper
 $nodeContent = Get-Content -Raw $nodeScript
@@ -41,6 +51,13 @@ if ($zshContent -notmatch "#!/bin/zsh" -or $zshContent -notmatch "codex-dictatio
 foreach ($marker in @("launchctl", "/usr/bin/pbcopy", "codex-dictation-hooks-hud.swift")) {
   if ($nodeContent -notmatch [regex]::Escape($marker)) {
     throw "Missing macOS preservation marker: $marker"
+  }
+}
+
+Write-Step "Checking Windows manual session markers"
+foreach ($marker in @("case `"start`":", "case `"stop`":", "Autostart: disabled", "codex-dictation-hooks-win-hud.ps1", "Set-Clipboard")) {
+  if ($nodeContent -notmatch [regex]::Escape($marker)) {
+    throw "Missing Windows session marker: $marker"
   }
 }
 
@@ -68,6 +85,27 @@ try {
   Remove-Item Env:CODEX_DICTATION_HISTORY -ErrorAction SilentlyContinue
   Remove-Item Env:CODEX_DICTATION_HOOKS_CONFIG -ErrorAction SilentlyContinue
   Remove-Item Env:CODEX_DICTATION_ACTION -ErrorAction SilentlyContinue
+  Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
+}
+
+Write-Step "Checking processed history command"
+$tmp = Join-Path $env:TEMP ("codex-dictation-hooks-test-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $tmp | Out-Null
+
+try {
+  $processedHistory = Join-Path $tmp "processed-history.jsonl"
+  @(
+    (@{ createdAt = "2026-06-26T10:00:00.000Z"; outputText = "older output"; hookName = "rewrite-en"; wordCount = 2 } | ConvertTo-Json -Compress),
+    (@{ createdAt = "2026-06-26T10:01:00.000Z"; outputText = "newer output"; hookName = "summary-fr"; wordCount = 2 } | ConvertTo-Json -Compress)
+  ) | Set-Content -Encoding utf8 -Path $processedHistory
+
+  $env:CODEX_DICTATION_PROCESSED_HISTORY = $processedHistory
+  $historyOutput = & $cli history
+  if (($historyOutput -join "`n") -notmatch "newer output" -or ($historyOutput -join "`n") -notmatch "older output") {
+    throw "Processed history command did not include expected entries."
+  }
+} finally {
+  Remove-Item Env:CODEX_DICTATION_PROCESSED_HISTORY -ErrorAction SilentlyContinue
   Remove-Item -Recurse -Force -LiteralPath $tmp -ErrorAction SilentlyContinue
 }
 

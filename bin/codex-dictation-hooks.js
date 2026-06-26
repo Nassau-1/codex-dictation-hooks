@@ -23,6 +23,8 @@ const historyFile = process.env.CODEX_DICTATION_HISTORY ||
   path.join(homeDir, ".codex", "transcription-history.jsonl");
 const statsFile = process.env.CODEX_DICTATION_STATS ||
   path.join(homeDir, ".config", "codex-dictation-hooks", "stats.json");
+const processedHistoryFile = process.env.CODEX_DICTATION_PROCESSED_HISTORY ||
+  path.join(homeDir, ".config", "codex-dictation-hooks", "processed-history.jsonl");
 const logDir = path.join(homeDir, ".codex", "log");
 const stdoutLog = path.join(logDir, "codex-dictation-hooks.out.log");
 const stderrLog = path.join(logDir, "codex-dictation-hooks.err.log");
@@ -32,7 +34,8 @@ const hooksConfigPath = process.env.CODEX_DICTATION_HOOKS_CONFIG ||
   (fs.existsSync(repoConfigPath) ? repoConfigPath : userConfigPath);
 const hudBinaryPath = path.join(scriptDir, "codex-dictation-hooks-hud");
 const hudSourcePath = path.join(scriptDir, "codex-dictation-hooks-hud.swift");
-const hudPath = fs.existsSync(hudBinaryPath) ? hudBinaryPath : hudSourcePath;
+const macHudPath = fs.existsSync(hudBinaryPath) ? hudBinaryPath : hudSourcePath;
+const winHudPath = path.join(scriptDir, "codex-dictation-hooks-win-hud.ps1");
 
 let hooksConfigCache = { mtimeMs: null, config: null };
 
@@ -276,7 +279,7 @@ function renderHookPrompt(template, text, model) {
 }
 
 function shouldShowHud(config = {}) {
-  if (!isMac) return false;
+  if (!isMac && !isWindows) return false;
 
   const envValue = process.env.CODEX_DICTATION_HUD;
   if (envValue === "0" || envValue === "false" || envValue === "off") return false;
@@ -286,13 +289,45 @@ function shouldShowHud(config = {}) {
 }
 
 function startHud(config = {}, args = []) {
-  if (!shouldShowHud(config) || !hudPath || !fs.existsSync(hudPath)) return null;
+  if (!shouldShowHud(config)) return null;
+
+  if (isWindows) {
+    if (!fs.existsSync(winHudPath)) return null;
+
+    const parsed = parseHudArgs(args);
+    const psArgs = [
+      "-NoProfile",
+      "-ExecutionPolicy",
+      "Bypass",
+      "-File",
+      winHudPath,
+      "-Kind",
+      parsed.kind,
+      "-Message",
+      parsed.message || "Processing hook...",
+      "-HistoryPath",
+      processedHistoryFile,
+    ];
+    if (parsed.seconds !== null && parsed.seconds !== undefined) {
+      psArgs.push("-DurationSeconds", String(parsed.seconds));
+    }
+
+    try {
+      const child = spawn("powershell.exe", psArgs, { detached: false, stdio: "ignore" });
+      child.unref();
+      return child;
+    } catch {
+      return null;
+    }
+  }
+
+  if (!isMac || !macHudPath || !fs.existsSync(macHudPath)) return null;
 
   try {
-    const child = fs.statSync(hudPath).mode & 0o111
-      ? spawn(hudPath, args, { detached: false, stdio: "ignore" })
+    const child = fs.statSync(macHudPath).mode & 0o111
+      ? spawn(macHudPath, args, { detached: false, stdio: "ignore" })
       : commandExists("swift")
-        ? spawn("/usr/bin/swift", [hudPath, ...args], { detached: false, stdio: "ignore" })
+        ? spawn("/usr/bin/swift", [macHudPath, ...args], { detached: false, stdio: "ignore" })
         : null;
 
     if (!child) return null;
@@ -301,6 +336,17 @@ function startHud(config = {}, args = []) {
   } catch {
     return null;
   }
+}
+
+function parseHudArgs(args = []) {
+  const [kind = "processing", maybeSeconds, ...rest] = args;
+  const seconds = Number(maybeSeconds);
+  const hasSeconds = Number.isFinite(seconds);
+  return {
+    kind,
+    seconds: hasSeconds ? seconds : null,
+    message: hasSeconds ? rest.join(" ") : [maybeSeconds, ...rest].filter(Boolean).join(" "),
+  };
 }
 
 function showHudMessage(config, kind, message, seconds = null) {
@@ -385,10 +431,10 @@ function stopHud(child) {
 
 function maybeTransformText(text) {
   const config = readHooksConfig();
-  if (!config || !Array.isArray(config.hooks)) return text;
+  if (!config || !Array.isArray(config.hooks)) return { text, hookName: null, transformed: false };
 
   const hook = findMatchingHook(text, config.hooks);
-  if (!hook) return text;
+  if (!hook) return { text, hookName: null, transformed: false };
 
   const model = selectedModel(config, hook);
   const configuredCommand = process.env.CODEX_DICTATION_AGENT_COMMAND || platformValue(config, "agentCommand");
@@ -396,7 +442,7 @@ function maybeTransformText(text) {
   if (!commandExists(agentCommand)) {
     console.error(`Matched hook "${hook.name || "unnamed"}" but agent command is unavailable.`);
     showHudNotice(config, "Hook agent unavailable");
-    return text;
+    return { text, hookName: hook.name || null, transformed: false };
   }
 
   const prompt = renderHookPrompt(hook.prompt, text, model);
@@ -412,18 +458,18 @@ function maybeTransformText(text) {
     const detail = result.error?.message || result.stderr?.trim() || `exit ${result.status}`;
     console.error(`Hook "${hook.name || "unnamed"}" failed: ${detail}`);
     showHudNotice(config, "Hook failed. Using original text.");
-    return text;
+    return { text, hookName: hook.name || null, transformed: false };
   }
 
   const transformed = String(result.stdout || "").trim();
   if (!transformed) {
     showHudNotice(config, "Hook returned no text");
-    return text;
+    return { text, hookName: hook.name || null, transformed: false };
   }
 
   const modelLabel = model ? ` using ${model}` : "";
   console.log(`[${new Date().toISOString()}] transformed dictation with hook: ${hook.name || "unnamed"}${modelLabel}`);
-  return transformed;
+  return { text: transformed, hookName: hook.name || null, transformed: true };
 }
 
 function runAction(text) {
@@ -457,6 +503,53 @@ function runAction(text) {
   if (result.status !== 0) throw new Error(`action exited with status ${result.status}`);
 }
 
+function appendProcessedHistory(entry) {
+  if (!processedHistoryFile) return;
+
+  mkdirp(path.dirname(processedHistoryFile));
+  fs.appendFileSync(processedHistoryFile, `${JSON.stringify({
+    createdAt: new Date().toISOString(),
+    inputText: entry.inputText,
+    outputText: entry.outputText,
+    hookName: entry.hookName || null,
+    transformed: Boolean(entry.transformed),
+    wordCount: normalizeCount(entry.wordCount),
+  })}\n`, "utf8");
+}
+
+function recentProcessedEntries(limit = 5) {
+  if (!fs.existsSync(processedHistoryFile)) return [];
+
+  const lines = fs.readFileSync(processedHistoryFile, "utf8").trim().split(/\r?\n/).filter(Boolean).reverse();
+  const entries = [];
+  for (const line of lines) {
+    try {
+      const item = JSON.parse(stripBom(line));
+      if (typeof item.outputText === "string" && item.outputText.trim()) {
+        entries.push(item);
+      }
+    } catch {}
+    if (entries.length >= limit) break;
+  }
+  return entries;
+}
+
+function historyCommand() {
+  const entries = recentProcessedEntries(5);
+  if (!entries.length) {
+    console.log("No processed dictations yet.");
+    return;
+  }
+
+  entries.forEach((entry, index) => {
+    const hook = entry.hookName ? ` [${entry.hookName}]` : "";
+    const words = normalizeCount(entry.wordCount);
+    console.log(`${index + 1}. ${entry.createdAt || "unknown"}${hook} (${formatNumber(words)} ${pluralize(words, "word")})`);
+    console.log(entry.outputText);
+    if (index < entries.length - 1) console.log("");
+  });
+}
+
 function processLine(line) {
   if (!line.trim()) return;
 
@@ -471,9 +564,17 @@ function processLine(line) {
   if (!text) return;
 
   try {
-    const handledText = maybeTransformText(text);
+    const handled = maybeTransformText(text);
+    const handledText = handled.text;
     runAction(handledText);
-    const tally = addToTally(text);
+    const tally = addToTally(handledText);
+    appendProcessedHistory({
+      inputText: text,
+      outputText: handledText,
+      hookName: handled.hookName,
+      transformed: handled.transformed,
+      wordCount: tally?.wordCount || countWords(handledText),
+    });
     if (tally) showTallyHud(readHooksConfig() || {}, tally);
     console.log(`[${new Date().toISOString()}] handled dictation: ${handledText}`);
   } catch (error) {
@@ -535,7 +636,7 @@ function latestText() {
     try {
       const item = JSON.parse(stripBom(line));
       if (typeof item.text === "string" && item.text.trim()) {
-        return maybeTransformText(item.text.trim());
+        return maybeTransformText(item.text.trim()).text;
       }
     } catch {}
   }
@@ -583,53 +684,27 @@ function printStats(stats) {
   console.log(`File: ${statsFile}`);
 }
 
-function powershellLiteral(value) {
-  return `'${String(value).replaceAll("'", "''")}'`;
-}
-
-function vbsLiteral(value) {
-  return `"${String(value).replaceAll('"', '""')}"`;
-}
-
 function installWindowsAgent() {
   const installDir = path.join(process.env.LOCALAPPDATA || path.join(homeDir, "AppData", "Local"), "codex-dictation-hooks");
   const installedPs1 = path.join(installDir, "codex-dictation-hooks.ps1");
   const installedCmd = path.join(installDir, "codex-dictation-hooks.cmd");
   const installedJs = path.join(installDir, "codex-dictation-hooks.js");
+  const installedWinHud = path.join(installDir, "codex-dictation-hooks-win-hud.ps1");
 
   mkdirp(installDir);
   mkdirp(logDir);
   copyIfExists(scriptPath, installedJs);
   copyIfExists(path.join(scriptDir, "codex-dictation-hooks.ps1"), installedPs1);
   copyIfExists(path.join(scriptDir, "codex-dictation-hooks.cmd"), installedCmd);
+  copyIfExists(winHudPath, installedWinHud);
   installDefaultUserConfig();
+  removeWindowsAutostart();
   stopWindowsWatchers();
+  startWindowsWatcher(installedPs1);
 
-  const action = `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${installedPs1}" watch`;
-  const ps = [
-    `$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ${powershellLiteral(`-NoProfile -ExecutionPolicy Bypass -File "${installedPs1}" watch`)}`,
-    "$trigger = New-ScheduledTaskTrigger -AtLogOn",
-    "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries",
-    `Register-ScheduledTask -TaskName ${powershellLiteral(WINDOWS_TASK_NAME)} -Action $action -Trigger $trigger -Settings $settings -Description ${powershellLiteral("Watch Codex dictation history and run local hooks")} -Force | Out-Null`,
-    `Start-ScheduledTask -TaskName ${powershellLiteral(WINDOWS_TASK_NAME)}`,
-  ].join("; ");
-
-  const result = spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], {
-    encoding: "utf8",
-  });
-
-  if (result.status !== 0) {
-    installWindowsStartupAgent(installedPs1);
-    console.warn("Scheduled Task registration failed; installed user Startup fallback instead.");
-    if (result.stderr || result.stdout) console.warn(String(result.stderr || result.stdout).trim());
-    console.log(`Installed ${WINDOWS_TASK_NAME} startup fallback`);
-    console.log(`Command: ${action}`);
-    console.log(`Install path: ${installDir}`);
-    return;
-  }
-
-  console.log(`Installed ${WINDOWS_TASK_NAME}`);
-  console.log(`Command: ${action}`);
+  console.log(`Installed ${WINDOWS_TASK_NAME} for the current user`);
+  console.log("Autostart: disabled");
+  console.log(`Started watcher: ${isWindowsWatcherRunning() ? "yes" : "no"}`);
   console.log(`Install path: ${installDir}`);
 }
 
@@ -643,19 +718,32 @@ function windowsStartupPath() {
   return path.join(appData, "Microsoft", "Windows", "Start Menu", "Programs", "Startup", WINDOWS_STARTUP_FILE);
 }
 
-function installWindowsStartupAgent(installedPs1) {
-  const startupPath = windowsStartupPath();
-  mkdirp(path.dirname(startupPath));
-  const command = `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${installedPs1}" watch`;
-  const vbs = [
-    'Set WshShell = CreateObject("WScript.Shell")',
-    `WshShell.Run ${vbsLiteral(command)}, 0, False`,
-    "",
-  ].join("\r\n");
+function removeWindowsAutostart() {
+  spawnSync("schtasks.exe", ["/End", "/TN", WINDOWS_TASK_NAME], { stdio: "ignore" });
+  spawnSync("schtasks.exe", ["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"], { stdio: "ignore" });
+  fs.rmSync(windowsStartupPath(), { force: true });
+}
 
-  fs.writeFileSync(startupPath, vbs, "utf8");
-  const child = spawn("wscript.exe", [startupPath], { detached: true, stdio: "ignore" });
-  child.unref();
+function startWindowsWatcher(ps1Path = path.join(scriptDir, "codex-dictation-hooks.ps1")) {
+  if (!fs.existsSync(ps1Path)) {
+    throw new Error(`Windows launcher not found: ${ps1Path}`);
+  }
+
+  const command = [
+    "$ErrorActionPreference = 'Stop'",
+    `$script = ${quotePowerShell(ps1Path)}`,
+    "Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File',$script,'watch')",
+  ].join("; ");
+  const result = spawnSync("powershell.exe", [
+    "-NoProfile",
+    "-ExecutionPolicy",
+    "Bypass",
+    "-Command",
+    command,
+  ], { encoding: "utf8" });
+
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(result.stderr || result.stdout || "failed to start watcher");
 }
 
 function installMacAgent() {
@@ -717,14 +805,44 @@ function installAgent() {
   }
 }
 
+function startAgent() {
+  if (isWindows) {
+    stopWindowsWatchers();
+    startWindowsWatcher();
+    console.log(`Watcher running: ${isWindowsWatcherRunning() ? "yes" : "no"}`);
+    return;
+  }
+
+  if (isMac) {
+    installMacAgent();
+    return;
+  }
+
+  console.error("Automatic start is currently supported on Windows and macOS.");
+  process.exit(2);
+}
+
+function stopAgent() {
+  if (isWindows) {
+    stopWindowsWatchers();
+    console.log(`Watcher running: ${isWindowsWatcherRunning() ? "yes" : "no"}`);
+    return;
+  }
+
+  if (isMac) {
+    const plistPath = path.join(homeDir, "Library", "LaunchAgents", `${LABEL}.plist`);
+    spawnSync("launchctl", ["bootout", `gui/${process.getuid()}`, plistPath], { stdio: "ignore" });
+    console.log(`Stopped ${LABEL}`);
+    return;
+  }
+
+  console.error("Automatic stop is currently supported on Windows and macOS.");
+  process.exit(2);
+}
+
 function uninstallAgent() {
   if (isWindows) {
-    spawnSync("schtasks.exe", ["/End", "/TN", WINDOWS_TASK_NAME], { stdio: "ignore" });
-    const result = spawnSync("schtasks.exe", ["/Delete", "/TN", WINDOWS_TASK_NAME, "/F"], { encoding: "utf8" });
-    if (result.status !== 0 && !String(result.stderr || result.stdout).includes("cannot find")) {
-      throw new Error(result.stderr || result.stdout || "failed to delete scheduled task");
-    }
-    fs.rmSync(windowsStartupPath(), { force: true });
+    removeWindowsAutostart();
     stopWindowsWatchers();
     console.log(`Uninstalled ${WINDOWS_TASK_NAME}`);
     return;
@@ -744,22 +862,9 @@ function uninstallAgent() {
 
 function statusAgent() {
   if (isWindows) {
-    const result = spawnSync("schtasks.exe", ["/Query", "/TN", WINDOWS_TASK_NAME, "/FO", "LIST", "/V"], {
-      encoding: "utf8",
-    });
-    if (result.status === 0) {
-      process.stdout.write(result.stdout || "");
-      process.exit(0);
-    }
-
-    const startupPath = windowsStartupPath();
-    if (fs.existsSync(startupPath)) {
-      console.log(`Scheduled Task not registered. Startup fallback is installed: ${startupPath}`);
-      process.exit(0);
-    }
-
-    process.stderr.write(result.stderr || result.stdout || "CodexDictationHooks is not installed.\n");
-    process.exit(result.status || 1);
+    console.log(`Watcher running: ${isWindowsWatcherRunning() ? "yes" : "no"}`);
+    console.log(`Autostart: ${fs.existsSync(windowsStartupPath()) ? `legacy Startup file present: ${windowsStartupPath()}` : "disabled"}`);
+    process.exit(0);
   }
 
   if (isMac) {
@@ -818,14 +923,16 @@ function doctorCommand() {
   console.log(`Hooks config valid: ${config ? "yes" : "no"}`);
   console.log(`Hook count: ${Array.isArray(config?.hooks) ? config.hooks.length : 0}`);
   console.log(`Agent command available: ${config ? (commandExists(platformValue(config, "agentCommand")) ? "yes" : "no") : "unknown"}`);
+  console.log(`Output action: ${platformValue(config || {}, "actionCommand") ? "custom actionCommand" : "clipboard"}`);
+  console.log(`Processed history: ${processedHistoryFile}`);
   if (isWindows) {
-    console.log(`Startup fallback: ${fs.existsSync(windowsStartupPath()) ? windowsStartupPath() : "not installed"}`);
+    console.log(`Autostart: ${fs.existsSync(windowsStartupPath()) ? `legacy Startup file present: ${windowsStartupPath()}` : "disabled"}`);
     console.log(`Watcher running: ${isWindowsWatcherRunning() ? "yes" : "no"}`);
   }
 }
 
 function usage() {
-  console.error("Usage: codex-dictation-hooks [watch|install|uninstall|status|doctor|latest|tally|import-tally <word-count>]");
+  console.error("Usage: codex-dictation-hooks [watch|start|stop|install|uninstall|status|doctor|latest|history|tally|import-tally <word-count>]");
 }
 
 function main() {
@@ -838,6 +945,12 @@ function main() {
     case "install":
       installAgent();
       break;
+    case "start":
+      startAgent();
+      break;
+    case "stop":
+      stopAgent();
+      break;
     case "uninstall":
       uninstallAgent();
       break;
@@ -849,6 +962,9 @@ function main() {
       break;
     case "latest":
       handleLatest();
+      break;
+    case "history":
+      historyCommand();
       break;
     case "tally":
       tallyCommand("view");

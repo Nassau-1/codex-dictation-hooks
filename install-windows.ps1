@@ -1,6 +1,6 @@
 param(
   [string] $RepoUrl = "https://github.com/Nassau-1/codex-dictation-hooks.git",
-  [string] $Branch = "codex/windows-support-low-cost-hooks",
+  [string] $Branch = "main",
   [string] $SourceDir = "$env:LOCALAPPDATA\codex-dictation-hooks-source",
   [switch] $NoInstall
 )
@@ -94,3 +94,5 @@ Write-Step "Installing Codex dictation hooks"
 & $installer install
 Write-Step "Installed. Run this anytime for diagnostics:"
 Write-Host "  & `"$installer`" doctor"
+Write-Step "Autostart is disabled. Run this when you want to start the watcher manually:"
+Write-Host "  & `"$installer`" start"

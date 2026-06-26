@@ -17,7 +17,8 @@ The Windows layer is added on top:
 - `bin/codex-dictation-hooks.ps1` and `.cmd` wrappers;
 - a Node.js cross-platform core shared by Windows and macOS;
 - Windows clipboard support through `Set-Clipboard`;
-- startup installation through a Scheduled Task when allowed, with a user Startup fallback;
+- manual current-session watcher start/stop without logon autostart;
+- a small Windows status/history HUD for copied text, word tally, and the last five processed dictations;
 - `doctor` diagnostics;
 - low-cost Codex hook examples for English and French dictation workflows.
 
@@ -34,9 +35,10 @@ This tool watches that JSONL file for new transcript entries. For each transcrip
 1. checks whether a configured trigger phrase matches;
 2. runs the matching deterministic hook, if any;
 3. copies the final text to the clipboard by default;
-4. updates the local word tally.
+4. records the processed output in local history;
+5. updates the local word tally.
 
-On Windows, the default action uses `Set-Clipboard`. On macOS, the default action uses `pbcopy`.
+On Windows, the default action uses `Set-Clipboard`. On macOS, the default action uses `pbcopy`. The watcher never sends keystrokes and never presses `Ctrl+V`; if raw dictated text appears in the focused app, that insertion is coming from Codex's native dictation UI before this watcher processes the transcript.
 
 ## Screenshots
 
@@ -50,16 +52,22 @@ Native macOS HUD previews from the upstream project:
 
 ## Windows quick install
 
-From PowerShell, this clones or updates the Windows fork branch under `%LOCALAPPDATA%\codex-dictation-hooks-source`, then installs the watcher:
+From PowerShell, this clones or updates the Windows fork under `%LOCALAPPDATA%\codex-dictation-hooks-source`, installs the watcher files, and starts the watcher for the current session:
 
 ```powershell
-irm https://raw.githubusercontent.com/Nassau-1/codex-dictation-hooks/codex/windows-support-low-cost-hooks/install-windows.ps1 | iex
+irm https://raw.githubusercontent.com/Nassau-1/codex-dictation-hooks/main/install-windows.ps1 | iex
 ```
 
 Run diagnostics:
 
 ```powershell
 & "$env:LOCALAPPDATA\codex-dictation-hooks-source\bin\codex-dictation-hooks.ps1" doctor
+```
+
+Start the watcher again later if needed:
+
+```powershell
+& "$env:LOCALAPPDATA\codex-dictation-hooks-source\bin\codex-dictation-hooks.ps1" start
 ```
 
 This tool only watches successful Codex dictation output after Codex writes `~/.codex/transcription-history.jsonl`. If Codex itself shows `Unable to transcribe audio` or an API `429`, fix/retry native Codex dictation first; the hook will not run until Codex has produced a transcript.
@@ -81,25 +89,16 @@ The installer copies the runnable files to:
 %LOCALAPPDATA%\codex-dictation-hooks\
 ```
 
-and registers a Windows Scheduled Task named:
-
-```text
-CodexDictationHooks
-```
-
-The task starts at logon and is started immediately after install. If Windows blocks user Scheduled Task registration, the installer falls back to a hidden user Startup script at:
-
-```text
-%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\CodexDictationHooks.vbs
-```
-
-That fallback starts the same watcher at login without requiring administrator rights.
+and starts the watcher for the current Windows session. It does not register a Scheduled Task and does not add a Startup-folder script. If an older install created either autostart path, the current installer removes it.
 
 Useful Windows commands:
 
 ```powershell
 .\bin\codex-dictation-hooks.ps1 watch
+.\bin\codex-dictation-hooks.ps1 start
+.\bin\codex-dictation-hooks.ps1 stop
 .\bin\codex-dictation-hooks.ps1 latest
+.\bin\codex-dictation-hooks.ps1 history
 .\bin\codex-dictation-hooks.ps1 status
 .\bin\codex-dictation-hooks.ps1 doctor
 .\bin\codex-dictation-hooks.ps1 uninstall
@@ -222,9 +221,23 @@ You can set a model per hook:
 }
 ```
 
-## Word tally
+## Processed history and word tally
 
-The watcher counts words from each new transcript and stores the tally at:
+The watcher stores the last processed outputs at:
+
+```text
+~/.config/codex-dictation-hooks/processed-history.jsonl
+```
+
+Show the five most recent processed dictations:
+
+```powershell
+.\bin\codex-dictation-hooks.ps1 history
+```
+
+On Windows, clicking the small status HUD opens a compact history window with copy buttons for the last five processed dictations.
+
+The watcher counts words from each processed output and stores the tally at:
 
 ```text
 ~/.config/codex-dictation-hooks/stats.json
@@ -249,11 +262,11 @@ $env:CODEX_DICTATION_STATS = "C:\path\to\stats.json"
 .\bin\codex-dictation-hooks.ps1 watch
 ```
 
-## macOS HUD
+## HUDs
 
-The native Swift HUD remains macOS-only. Set `"showHud": false` in your hooks config, or run with `CODEX_DICTATION_HUD=0`, to disable it.
+The native Swift HUD remains available on macOS. Windows uses `bin/codex-dictation-hooks-win-hud.ps1` for a small status surface. It can show hook processing, copied/tally notices, and a clickable last-five history view.
 
-On Windows, hook processing is intentionally silent except for terminal logs and Scheduled Task status.
+Set `"showHud": false` in your hooks config, or run with `CODEX_DICTATION_HUD=0`, to disable HUDs.
 
 ## Test
 
@@ -263,7 +276,7 @@ Run the smoke tests from PowerShell:
 .\scripts\smoke-test.ps1
 ```
 
-The smoke test checks JavaScript syntax, JSON config parsing, PowerShell installer syntax, `doctor`, raw clipboard-action behavior, and accent-insensitive French trigger matching using a fake local agent. It does not call a real Codex model and does not consume model credits.
+The smoke test checks JavaScript syntax, JSON config parsing, PowerShell installer and Windows HUD syntax, `doctor`, raw clipboard-action behavior, processed-history recording, manual start/stop command wiring, static macOS preservation markers, and accent-insensitive French trigger matching using a fake local agent. It does not call a real Codex model and does not consume model credits.
 
 ## License
 
