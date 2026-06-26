@@ -21,7 +21,23 @@ This tool watches that JSONL file for new transcript entries. For each transcrip
 
 On Windows, the default action uses `Set-Clipboard`. On macOS, the default action uses `pbcopy`.
 
-## Windows install
+## Windows quick install
+
+From PowerShell, this clones or updates the Windows fork branch under `%LOCALAPPDATA%\codex-dictation-hooks-source`, then installs the watcher:
+
+```powershell
+irm https://raw.githubusercontent.com/Nassau-1/codex-dictation-hooks/codex/windows-support-low-cost-hooks/install-windows.ps1 | iex
+```
+
+Run diagnostics:
+
+```powershell
+& "$env:LOCALAPPDATA\codex-dictation-hooks-source\bin\codex-dictation-hooks.ps1" doctor
+```
+
+This tool only watches successful Codex dictation output after Codex writes `~/.codex/transcription-history.jsonl`. If Codex itself shows `Unable to transcribe audio` or an API `429`, fix/retry native Codex dictation first; the hook will not run until Codex has produced a transcript.
+
+## Manual Windows install
 
 From PowerShell:
 
@@ -58,6 +74,7 @@ Useful Windows commands:
 .\bin\codex-dictation-hooks.ps1 watch
 .\bin\codex-dictation-hooks.ps1 latest
 .\bin\codex-dictation-hooks.ps1 status
+.\bin\codex-dictation-hooks.ps1 doctor
 .\bin\codex-dictation-hooks.ps1 uninstall
 .\bin\codex-dictation-hooks.ps1 tally
 .\bin\codex-dictation-hooks.ps1 import-tally 25000

@@ -165,6 +165,14 @@ function countWords(text) {
   return matches ? matches.length : 0;
 }
 
+function normalizeForMatch(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\u2018\u2019]/g, "'")
+    .toLocaleLowerCase();
+}
+
 function defaultStats() {
   return {
     baseWords: 0,
@@ -228,14 +236,14 @@ function addToTally(text) {
 }
 
 function findMatchingHook(text, hooks) {
-  const normalized = text.toLocaleLowerCase();
+  const normalized = normalizeForMatch(text);
 
   return hooks.find((hook) => {
     if (!hook || !Array.isArray(hook.phrases)) return false;
     return hook.phrases.some((phrase) => (
       typeof phrase === "string" &&
       phrase.trim().length > 0 &&
-      normalized.includes(phrase.trim().toLocaleLowerCase())
+      normalized.includes(normalizeForMatch(phrase.trim()))
     ));
   });
 }
@@ -626,7 +634,7 @@ function installWindowsAgent() {
 }
 
 function stopWindowsWatchers() {
-  const stopScript = "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*codex-dictation-hooks.ps1*watch*' -or $_.CommandLine -like '*codex-dictation-hooks.js*watch*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }";
+  const stopScript = "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'codex-dictation-hooks\\.ps1\"?\\s+watch' -or $_.CommandLine -match 'codex-dictation-hooks\\.js\"?\\s+watch' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }";
   spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", stopScript], { stdio: "ignore" });
 }
 
@@ -765,8 +773,59 @@ function statusAgent() {
   process.exit(2);
 }
 
+function isWindowsWatcherRunning() {
+  if (!isWindows) return false;
+
+  const script = "if (Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'codex-dictation-hooks\\.ps1\"?\\s+watch' -or $_.CommandLine -match 'codex-dictation-hooks\\.js\"?\\s+watch' }) { exit 0 } else { exit 1 }";
+  return spawnSync("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script]).status === 0;
+}
+
+function lastTranscriptionEntry() {
+  if (!fs.existsSync(historyFile)) return null;
+
+  const content = fs.readFileSync(historyFile, "utf8").trim();
+  if (!content) return null;
+
+  const lines = content.split(/\r?\n/).reverse();
+  for (const line of lines) {
+    try {
+      const item = JSON.parse(stripBom(line));
+      if (typeof item.text === "string" && item.text.trim()) return item;
+    } catch {}
+  }
+
+  return null;
+}
+
+function doctorCommand() {
+  const config = readHooksConfig();
+  const last = lastTranscriptionEntry();
+
+  console.log("Codex Dictation Hooks doctor");
+  console.log(`Platform: ${platform}`);
+  console.log(`Node: ${process.version}`);
+  console.log(`History file: ${historyFile}`);
+  console.log(`History exists: ${fs.existsSync(historyFile) ? "yes" : "no"}`);
+  if (last) {
+    const createdAt = Number.isFinite(Number(last.createdAtMs))
+      ? new Date(Number(last.createdAtMs)).toISOString()
+      : "unknown";
+    console.log(`Last transcription: ${createdAt}`);
+  } else {
+    console.log("Last transcription: none");
+  }
+  console.log(`Hooks config: ${hooksConfigPath}`);
+  console.log(`Hooks config valid: ${config ? "yes" : "no"}`);
+  console.log(`Hook count: ${Array.isArray(config?.hooks) ? config.hooks.length : 0}`);
+  console.log(`Agent command available: ${config ? (commandExists(platformValue(config, "agentCommand")) ? "yes" : "no") : "unknown"}`);
+  if (isWindows) {
+    console.log(`Startup fallback: ${fs.existsSync(windowsStartupPath()) ? windowsStartupPath() : "not installed"}`);
+    console.log(`Watcher running: ${isWindowsWatcherRunning() ? "yes" : "no"}`);
+  }
+}
+
 function usage() {
-  console.error("Usage: codex-dictation-hooks [watch|install|uninstall|status|latest|tally|import-tally <word-count>]");
+  console.error("Usage: codex-dictation-hooks [watch|install|uninstall|status|doctor|latest|tally|import-tally <word-count>]");
 }
 
 function main() {
@@ -784,6 +843,9 @@ function main() {
       break;
     case "status":
       statusAgent();
+      break;
+    case "doctor":
+      doctorCommand();
       break;
     case "latest":
       handleLatest();

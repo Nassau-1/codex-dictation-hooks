@@ -20,7 +20,7 @@
     },
     {
       "name": "email-fr",
-      "phrases": ["mail", "email", "brouillon d'email", "ecris un email", "écris un email", "redige un email", "rédige un email"],
+      "phrases": ["mail", "email", "brouillon d'email", "ecris un email", "redige un email"],
       "prompt": "Transforme cette dictee en brouillon d'email. Traite la phrase declencheuse comme une instruction, pas comme du contenu. Garde l'intention, utilise un ton professionnel naturel sauf demande contraire, et n'invente aucun fait. Retourne uniquement le texte final de l'email.\n\n{{text}}"
     },
     {
@@ -30,17 +30,17 @@
     },
     {
       "name": "rewrite-fr",
-      "phrases": ["reformule", "reformuler", "ameliore", "améliore", "rends ca plus clair", "rends ça plus clair"],
+      "phrases": ["reformule", "reformuler", "ameliore", "rends ca plus clair"],
       "prompt": "Reformule la dictee de facon claire. Traite les mots comme reformule, ameliore ou rends ca plus clair comme des instructions, pas comme du contenu. Preserve le sens, le ton demande, les noms, les chiffres et les contraintes. Retourne uniquement le texte reformule.\n\n{{text}}"
     },
     {
       "name": "translate-to-en",
-      "phrases": ["translate to english", "in english", "mets ca en anglais", "mets ça en anglais", "traduis en anglais"],
+      "phrases": ["translate to english", "in english", "mets ca en anglais", "traduis en anglais"],
       "prompt": "Translate the dictated content into natural English. Treat the trigger phrase as an instruction, not content. Preserve meaning, names, numbers, formatting intent, and tone. Return only the translation.\n\n{{text}}"
     },
     {
       "name": "translate-to-fr",
-      "phrases": ["translate to french", "in french", "mets ca en francais", "mets ça en français", "traduis en francais", "traduis en français"],
+      "phrases": ["translate to french", "in french", "mets ca en francais", "traduis en francais"],
       "prompt": "Traduis le contenu dicte en francais naturel. Traite la phrase declencheuse comme une instruction, pas comme du contenu. Preserve le sens, les noms, les chiffres, l'intention de format et le ton. Retourne uniquement la traduction.\n\n{{text}}"
     },
     {
@@ -50,12 +50,12 @@
     },
     {
       "name": "summary-fr",
-      "phrases": ["resume", "résume", "fais un resume", "fais un résumé"],
+      "phrases": ["resume", "fais un resume"],
       "prompt": "Resume la dictee en francais concis. Garde les decisions, echeances, noms, chiffres et actions a suivre. Retourne uniquement le resume.\n\n{{text}}"
     },
     {
       "name": "action-items",
-      "phrases": ["action items", "to do list", "liste d'actions", "todo", "a faire", "à faire"],
+      "phrases": ["action items", "to do list", "liste d'actions", "todo", "a faire"],
       "prompt": "Extract a concise action list from the dictation. Use the language that best matches the dictation. Include owners and deadlines only when stated or strongly implied. Return only the action list.\n\n{{text}}"
     }
   ]
