@@ -2,7 +2,24 @@
 
 Automation hooks for Codex dictation on Windows and macOS. The watcher reads new Codex dictation transcripts, optionally rewrites them with a cheap/low-effort Codex agent hook, then sends the final text to the clipboard or to a custom local action.
 
-The original project was macOS-first. This fork keeps macOS support and adds Windows support with PowerShell wrappers and a Scheduled Task installer.
+This is a Windows-focused fork of [`hcassar93/codex-dictation-hooks`](https://github.com/hcassar93/codex-dictation-hooks). The upstream project is macOS-first and MIT-licensed. This fork preserves the macOS LaunchAgent/HUD behavior and adds Windows support, a one-command Windows installer, diagnostics, and bilingual French/English hook examples.
+
+## Fork scope
+
+The original macOS behavior remains part of this fork:
+
+- `./bin/codex-dictation-hooks install` still installs a macOS LaunchAgent.
+- The native Swift HUD source and screenshots are retained.
+- macOS still uses `pbcopy` by default.
+
+The Windows layer is added on top:
+
+- `bin/codex-dictation-hooks.ps1` and `.cmd` wrappers;
+- a Node.js cross-platform core shared by Windows and macOS;
+- Windows clipboard support through `Set-Clipboard`;
+- startup installation through a Scheduled Task when allowed, with a user Startup fallback;
+- `doctor` diagnostics;
+- low-cost Codex hook examples for English and French dictation workflows.
 
 ## What it does
 
@@ -20,6 +37,16 @@ This tool watches that JSONL file for new transcript entries. For each transcrip
 4. updates the local word tally.
 
 On Windows, the default action uses `Set-Clipboard`. On macOS, the default action uses `pbcopy`.
+
+## Screenshots
+
+Native macOS HUD previews from the upstream project:
+
+<p>
+  <img src="assets/screenshots/processing-hud.png" alt="Processing HUD with animated dots" width="300">
+  <img src="assets/screenshots/tally-hud.png" alt="Word tally HUD showing added and total words" width="420">
+  <img src="assets/screenshots/notice-hud.png" alt="Hook status HUD showing a processed transcript notice" width="360">
+</p>
 
 ## Windows quick install
 
@@ -228,6 +255,16 @@ The native Swift HUD remains macOS-only. Set `"showHud": false` in your hooks co
 
 On Windows, hook processing is intentionally silent except for terminal logs and Scheduled Task status.
 
+## Test
+
+Run the smoke tests from PowerShell:
+
+```powershell
+.\scripts\smoke-test.ps1
+```
+
+The smoke test checks JavaScript syntax, JSON config parsing, PowerShell installer syntax, `doctor`, raw clipboard-action behavior, and accent-insensitive French trigger matching using a fake local agent. It does not call a real Codex model and does not consume model credits.
+
 ## License
 
-MIT. This fork preserves the upstream license.
+MIT. This fork preserves the upstream license and credits the original project by [`hcassar93`](https://github.com/hcassar93).
